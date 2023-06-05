@@ -63,7 +63,6 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.DataSourceSc
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestOperator;
 import org.apache.hyracks.algebricks.core.algebra.properties.INodeDomain;
 import org.apache.hyracks.api.exceptions.SourceLocation;
-import org.apache.hyracks.storage.am.common.dataflow.IndexDataflowHelperFactory;
 import org.apache.hyracks.util.LogRedactionUtil;
 
 public class QueryIndexRewriter extends FunctionRewriter implements IResultTypeComputer {
@@ -122,8 +121,6 @@ public class QueryIndexRewriter extends FunctionRewriter implements IResultTypeC
             SourceLocation loc, AbstractFunctionCallExpression f) throws AlgebricksException {
         ISecondaryIndexOperationsHelper secIdxHelper =
                 SecondaryIndexOperationsHelper.createIndexOperationsHelper(ds, idx, mp, loc);
-        new IndexDataflowHelperFactory(mp.getStorageComponentProvider().getStorageManager(),
-                secIdxHelper.getSecondaryFileSplitProvider());
         AlgebricksAbsolutePartitionConstraint secPartitionConstraint =
                 (AlgebricksAbsolutePartitionConstraint) secIdxHelper.getSecondaryPartitionConstraint();
         INodeDomain domain = mp.findNodeDomain(ds.getNodeGroupName());
@@ -143,6 +140,8 @@ public class QueryIndexRewriter extends FunctionRewriter implements IResultTypeC
         Index index = validateIndex(f, metadataProvider, loc, dataverseName, datasetName, indexName);
         ARecordType dsType = (ARecordType) metadataProvider.findType(dataset);
         ARecordType metaType = DatasetUtil.getMetaType(metadataProvider, dataset);
+        dsType = (ARecordType) metadataProvider.findTypeForDatasetWithoutType(dsType, metaType, dataset);
+
         List<IAType> dsKeyTypes = KeyFieldTypeUtil.getPartitoningKeyTypes(dataset, dsType, metaType);
         List<Pair<IAType, Boolean>> secKeyTypes = KeyFieldTypeUtil.getBTreeIndexKeyTypes(index, dsType, metaType);
         int numPrimaryKeys = dsKeyTypes.size();

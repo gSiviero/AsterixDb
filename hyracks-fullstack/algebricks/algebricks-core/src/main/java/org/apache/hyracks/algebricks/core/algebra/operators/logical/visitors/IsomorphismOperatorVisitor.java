@@ -19,6 +19,7 @@
 package org.apache.hyracks.algebricks.core.algebra.operators.logical.visitors;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,9 +75,9 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOpe
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WindowOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteOperator;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteResultOperator;
 import org.apache.hyracks.algebricks.core.algebra.properties.IPartitioningProperty;
 import org.apache.hyracks.algebricks.core.algebra.properties.IPhysicalPropertiesVector;
+import org.apache.hyracks.algebricks.core.algebra.properties.UnorderedPartitionedProperty;
 import org.apache.hyracks.algebricks.core.algebra.util.OperatorManipulationUtil;
 import org.apache.hyracks.algebricks.core.algebra.visitors.ILogicalOperatorVisitor;
 
@@ -384,9 +385,9 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         if (op.getOperatorTag() != LogicalOperatorTag.INTERSECT) {
             return Boolean.FALSE;
         }
-        IntersectOperator intersetOpArg = (IntersectOperator) copyAndSubstituteVar(op, arg);
+        IntersectOperator intersectOpArg = (IntersectOperator) copyAndSubstituteVar(op, arg);
         List<LogicalVariable> outputCompareVars = op.getOutputCompareVariables();
-        List<LogicalVariable> outputCompareVarsArg = intersetOpArg.getOutputCompareVariables();
+        List<LogicalVariable> outputCompareVarsArg = intersectOpArg.getOutputCompareVariables();
         if (outputCompareVars.size() != outputCompareVarsArg.size()) {
             return Boolean.FALSE;
         }
@@ -395,7 +396,7 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         }
         boolean hasExtraVars = op.hasExtraVariables();
         List<LogicalVariable> outputExtraVars = op.getOutputExtraVariables();
-        List<LogicalVariable> outputExtraVarsArg = intersetOpArg.getOutputExtraVariables();
+        List<LogicalVariable> outputExtraVarsArg = intersectOpArg.getOutputExtraVariables();
         if (outputExtraVars.size() != outputExtraVarsArg.size()) {
             return Boolean.FALSE;
         }
@@ -404,18 +405,21 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         }
 
         int nInput = op.getNumInput();
-        if (nInput != intersetOpArg.getNumInput()) {
+        if (nInput != intersectOpArg.getNumInput()) {
             return Boolean.FALSE;
         }
         for (int i = 0; i < nInput; i++) {
             if (!VariableUtilities.varListEqualUnordered(op.getInputCompareVariables(i),
-                    intersetOpArg.getInputCompareVariables(i))) {
+                    intersectOpArg.getInputCompareVariables(i))) {
                 return Boolean.FALSE;
             }
             if (hasExtraVars && !VariableUtilities.varListEqualUnordered(op.getInputExtraVariables(i),
-                    intersetOpArg.getInputExtraVariables(i))) {
+                    intersectOpArg.getInputExtraVariables(i))) {
                 return Boolean.FALSE;
             }
+        }
+        if (!Arrays.deepEquals(op.getPartitionsMap(), intersectOpArg.getPartitionsMap())) {
+            return Boolean.FALSE;
         }
         return Boolean.TRUE;
     }
@@ -447,7 +451,9 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         if (!isomorphic) {
             return Boolean.FALSE;
         }
-        isomorphic = op.getExpressionRef().getValue().equals(unnestOpArg.getExpressionRef().getValue());
+        isomorphic = op.getExpressionRef().getValue().equals(unnestOpArg.getExpressionRef().getValue())
+                && Objects.equals(op.getDatasetProjectionInfo(), unnestOpArg.getDatasetProjectionInfo())
+                && Objects.equals(op.getMetaProjectionInfo(), unnestOpArg.getMetaProjectionInfo());
         return isomorphic;
     }
 
@@ -480,7 +486,8 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         DataSourceScanOperator argScan = (DataSourceScanOperator) arg;
         boolean isomorphic = op.getDataSource().getId().equals(argScan.getDataSource().getId())
                 && op.getOutputLimit() == argScan.getOutputLimit()
-                && Objects.equals(op.getProjectionInfo(), argScan.getProjectionInfo());
+                && Objects.equals(op.getDatasetProjectionInfo(), argScan.getDatasetProjectionInfo())
+                && Objects.equals(op.getMetaProjectionInfo(), argScan.getMetaProjectionInfo());
 
         if (!isomorphic) {
             return Boolean.FALSE;
@@ -540,9 +547,15 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         if (!partProp.getNodeDomain().sameAs(partPropArg.getNodeDomain())) {
             return Boolean.FALSE;
         }
-        List<LogicalVariable> columns = new ArrayList<LogicalVariable>();
+        if (partProp.getPartitioningType() == IPartitioningProperty.PartitioningType.UNORDERED_PARTITIONED) {
+            if (!((UnorderedPartitionedProperty) partProp)
+                    .samePartitioningScheme(((UnorderedPartitionedProperty) partPropArg))) {
+                return Boolean.FALSE;
+            }
+        }
+        List<LogicalVariable> columns = new ArrayList<>();
         partProp.getColumns(columns);
-        List<LogicalVariable> columnsArg = new ArrayList<LogicalVariable>();
+        List<LogicalVariable> columnsArg = new ArrayList<>();
         partPropArg.getColumns(columnsArg);
         if (columns.size() != columnsArg.size()) {
             return Boolean.FALSE;
@@ -580,23 +593,6 @@ public class IsomorphismOperatorVisitor implements ILogicalOperatorVisitor<Boole
         }
         DistributeResultOperator writeOpArg = (DistributeResultOperator) copyAndSubstituteVar(op, arg);
         boolean isomorphic = VariableUtilities.varListEqualUnordered(op.getSchema(), writeOpArg.getSchema());
-        return isomorphic;
-    }
-
-    @Override
-    public Boolean visitWriteResultOperator(WriteResultOperator op, ILogicalOperator arg) throws AlgebricksException {
-        AbstractLogicalOperator aop = (AbstractLogicalOperator) arg;
-        if (aop.getOperatorTag() != LogicalOperatorTag.WRITE_RESULT) {
-            return Boolean.FALSE;
-        }
-        WriteResultOperator writeOpArg = (WriteResultOperator) copyAndSubstituteVar(op, arg);
-        boolean isomorphic = VariableUtilities.varListEqualUnordered(op.getSchema(), writeOpArg.getSchema());
-        if (!op.getDataSource().equals(writeOpArg.getDataSource())) {
-            isomorphic = false;
-        }
-        if (!op.getPayloadExpression().equals(writeOpArg.getPayloadExpression())) {
-            isomorphic = false;
-        }
         return isomorphic;
     }
 

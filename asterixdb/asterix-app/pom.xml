@@ -22,7 +22,7 @@
   <parent>
     <artifactId>apache-asterixdb</artifactId>
     <groupId>org.apache.asterix</groupId>
-    <version>0.9.8-SNAPSHOT</version>
+    <version>0.9.9-SNAPSHOT</version>
   </parent>
   <artifactId>asterix-app</artifactId>
   <licenses>
@@ -154,7 +154,6 @@
           <usedDependencies combine.children="append">
             <usedDependency>org.apache.hadoop:hadoop-common</usedDependency>
             <usedDependency>org.apache.asterix:asterix-geo</usedDependency>
-            <usedDependency>org.apache.tomcat:tomcat-annotations-api</usedDependency>
           </usedDependencies>
           <ignoredUnusedDeclaredDependencies>
             <ignoredUnusedDeclaredDependency>org.apache.asterix:asterix-external-data:zip:*</ignoredUnusedDeclaredDependency>
@@ -389,7 +388,7 @@
     <profile>
       <id>asterix-gerrit-asterix-app</id>
       <properties>
-        <test.excludes>**/SqlppExecutionWithCancellationTest.java,**/DmlTest.java,**/RepeatedTest.java,**/SqlppExecutionTest.java,**/AqlExecutionTest.java,**/*Compression*Test.java,**/*Ssl*Test.java,**/Podman*.java</test.excludes>
+        <test.excludes>**/SqlppExecutionWithCancellationTest.java,**/DmlTest.java,**/RepeatedTest.java,**/SqlppExecutionTest.java,**/*StaticPartitioning*Test.java,**/*Ssl*Test.java,**/Podman*.java,**/*AnalyzedExecutionTest.java,**/SqlppProfiledExecutionTest.java</test.excludes>
         <itest.excludes>**/*.java</itest.excludes>
       </properties>
       <build>
@@ -438,7 +437,7 @@
     <profile>
       <id>asterix-gerrit-ssl-compression</id>
       <properties>
-        <test.includes>**/*Compression*Test.java,**/*Ssl*Test.java</test.includes>
+        <test.includes>**/*StaticPartitioning*Test.java,**/*Ssl*Test.java,**/*AnalyzedExecutionTest.java</test.includes>
         <itest.excludes>**/*.java</itest.excludes>
         <failIfNoTests>false</failIfNoTests>
       </properties>
@@ -446,7 +445,7 @@
     <profile>
       <id>asterix-gerrit-verify-asterix-app</id>
       <properties>
-        <test.includes>**/AqlExecutionTest.java</test.includes>
+        <test.includes>**/SqlppProfiledExecutionTest.java</test.includes>
         <itest.excludes>**/External*IT.java,**/SqlppExecution*IT.java,**/SqlppRQG*IT.java,**/RebalanceWithCancellationIT.java</itest.excludes>
         <failIfNoTests>false</failIfNoTests>
       </properties>
@@ -659,6 +658,12 @@
       <artifactId>hyracks-util</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.hyracks</groupId>
+      <artifactId>hyracks-util</artifactId>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>args4j</groupId>
       <artifactId>args4j</artifactId>
     </dependency>
@@ -775,6 +780,11 @@
       <artifactId>hyracks-storage-am-lsm-invertedindex</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.asterix</groupId>
+      <artifactId>asterix-cloud</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>postgresql</artifactId>
       <scope>test</scope>
@@ -880,14 +890,64 @@
       <artifactId>google-cloud-storage</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.apache.tomcat</groupId>
-      <artifactId>tomcat-annotations-api</artifactId>
-    </dependency>
-    <!-- Needed for inferring the schema for writing Parquet files -->
-    <dependency>
-      <groupId>org.kitesdk</groupId>
-      <artifactId>kite-data-core</artifactId>
+      <groupId>org.apache.iceberg</groupId>
+      <artifactId>iceberg-core</artifactId>
+      <version>1.1.0</version>
       <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.iceberg</groupId>
+      <artifactId>iceberg-data</artifactId>
+      <version>1.1.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.parquet</groupId>
+          <artifactId>parquet-avro</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.iceberg</groupId>
+          <artifactId>iceberg-core</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.iceberg</groupId>
+      <artifactId>iceberg-parquet</artifactId>
+      <version>1.1.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.parquet</groupId>
+          <artifactId>parquet-avro</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.iceberg</groupId>
+          <artifactId>iceberg-core</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.parquet</groupId>
+      <artifactId>parquet-avro</artifactId>
+      <version>1.12.3</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.slf4j</groupId>
+          <artifactId>slf4j-api</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>tech.allegro.schema.json2avro</groupId>
+      <artifactId>converter</artifactId>
+      <version>0.2.15</version>
     </dependency>
   </dependencies>
 </project>

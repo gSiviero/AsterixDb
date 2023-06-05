@@ -29,6 +29,7 @@ import org.apache.asterix.lang.common.statement.AnalyzeDropStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeStatement;
 import org.apache.asterix.lang.common.statement.CompactStatement;
 import org.apache.asterix.lang.common.statement.ConnectFeedStatement;
+import org.apache.asterix.lang.common.statement.CopyStatement;
 import org.apache.asterix.lang.common.statement.CreateAdapterStatement;
 import org.apache.asterix.lang.common.statement.CreateDataverseStatement;
 import org.apache.asterix.lang.common.statement.CreateFeedPolicyStatement;
@@ -68,7 +69,6 @@ import org.apache.asterix.lang.common.statement.TypeDropStatement;
 import org.apache.asterix.lang.common.statement.UpdateStatement;
 import org.apache.asterix.lang.common.statement.ViewDecl;
 import org.apache.asterix.lang.common.statement.ViewDropStatement;
-import org.apache.asterix.lang.common.statement.WriteStatement;
 
 public abstract class AbstractQueryExpressionVisitor<R, T> implements ILangVisitor<R, T> {
 
@@ -118,6 +118,11 @@ public abstract class AbstractQueryExpressionVisitor<R, T> implements ILangVisit
     }
 
     @Override
+    public R visit(CopyStatement stmtCopy, T arg) throws CompilationException {
+        return null;
+    }
+
+    @Override
     public R visit(NodegroupDecl ngd, T arg) throws CompilationException {
         return null;
     }
@@ -159,11 +164,6 @@ public abstract class AbstractQueryExpressionVisitor<R, T> implements ILangVisit
 
     @Override
     public R visit(UpdateStatement update, T arg) throws CompilationException {
-        return null;
-    }
-
-    @Override
-    public R visit(WriteStatement ws, T arg) throws CompilationException {
         return null;
     }
 

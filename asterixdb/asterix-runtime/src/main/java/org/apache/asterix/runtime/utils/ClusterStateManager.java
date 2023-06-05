@@ -30,16 +30,20 @@ import java.util.SortedMap;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.apache.asterix.common.api.IClusterManagementWork.ClusterState;
 import org.apache.asterix.common.cluster.ClusterPartition;
 import org.apache.asterix.common.cluster.IClusterStateManager;
+import org.apache.asterix.common.cluster.StorageComputePartitionsMap;
 import org.apache.asterix.common.dataflow.ICcApplicationContext;
 import org.apache.asterix.common.exceptions.AsterixException;
 import org.apache.asterix.common.exceptions.ErrorCode;
 import org.apache.asterix.common.replication.INcLifecycleCoordinator;
 import org.apache.asterix.common.transactions.IResourceIdManager;
 import org.apache.asterix.common.utils.NcLocalCounters;
+import org.apache.asterix.common.utils.PartitioningScheme;
+import org.apache.asterix.common.utils.StorageConstants;
 import org.apache.hyracks.algebricks.common.constraints.AlgebricksAbsolutePartitionConstraint;
 import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.api.config.IOption;
@@ -79,6 +83,7 @@ public class ClusterStateManager implements IClusterStateManager {
     private ICcApplicationContext appCtx;
     private ClusterPartition metadataPartition;
     private boolean rebalanceRequired;
+    private StorageComputePartitionsMap storageComputePartitionsMap;
 
     @Override
     public void setCcAppCtx(ICcApplicationContext appCtx) {
@@ -86,7 +91,14 @@ public class ClusterStateManager implements IClusterStateManager {
         node2PartitionsMap = appCtx.getMetadataProperties().getNodePartitions();
         clusterPartitions = appCtx.getMetadataProperties().getClusterPartitions();
         currentMetadataNode = appCtx.getMetadataProperties().getMetadataNodeName();
-        metadataPartition = node2PartitionsMap.get(currentMetadataNode)[0];
+        PartitioningScheme partitioningScheme = appCtx.getStorageProperties().getPartitioningScheme();
+        if (partitioningScheme == PartitioningScheme.DYNAMIC) {
+            metadataPartition = node2PartitionsMap.get(currentMetadataNode)[0];
+        } else {
+            final ClusterPartition fixedMetadataPartition = new ClusterPartition(StorageConstants.METADATA_PARTITION,
+                    appCtx.getMetadataProperties().getMetadataNodeName(), 0);
+            metadataPartition = fixedMetadataPartition;
+        }
         lifecycleCoordinator = appCtx.getNcLifecycleCoordinator();
         lifecycleCoordinator.bindTo(this);
     }
@@ -144,7 +156,16 @@ public class ClusterStateManager implements IClusterStateManager {
         if (active) {
             updateClusterCounters(nodeId, localCounters);
             participantNodes.add(nodeId);
-            activateNodePartitions(nodeId, activePartitions);
+            if (appCtx.isCloudDeployment()) {
+                // node compute partitions never change
+                ClusterPartition[] nodePartitions = getNodePartitions(nodeId);
+                activePartitions =
+                        Arrays.stream(nodePartitions).map(ClusterPartition::getPartitionId).collect(Collectors.toSet());
+                activateNodePartitions(nodeId, activePartitions);
+            } else {
+                activateNodePartitions(nodeId, activePartitions);
+            }
+
         } else {
             participantNodes.remove(nodeId);
             deactivateNodePartitions(nodeId);
@@ -172,16 +193,7 @@ public class ClusterStateManager implements IClusterStateManager {
             return;
         }
         resetClusterPartitionConstraint();
-        // if the cluster has no registered partitions or all partitions are pending activation -> UNUSABLE
-        if (clusterPartitions.isEmpty()
-                || clusterPartitions.values().stream().allMatch(ClusterPartition::isPendingActivation)) {
-            LOGGER.info("Cluster does not have any registered partitions");
-            setState(ClusterState.UNUSABLE);
-            return;
-        }
-
-        // exclude partitions that are pending activation
-        if (clusterPartitions.values().stream().anyMatch(p -> !p.isActive() && !p.isPendingActivation())) {
+        if (isClusterUnusable()) {
             setState(ClusterState.UNUSABLE);
             return;
         }
@@ -299,6 +311,7 @@ public class ClusterStateManager implements IClusterStateManager {
         clusterActiveLocations.removeAll(pendingRemoval);
         clusterPartitionConstraint =
                 new AlgebricksAbsolutePartitionConstraint(clusterActiveLocations.toArray(new String[] {}));
+        resetStorageComputeMap();
     }
 
     @Override
@@ -489,6 +502,20 @@ public class ClusterStateManager implements IClusterStateManager {
         return nodeIds.stream().anyMatch(failedNodes::contains);
     }
 
+    @Override
+    public int getStoragePartitionsCount() {
+        return appCtx.getStorageProperties().getStoragePartitionsCount();
+    }
+
+    public synchronized StorageComputePartitionsMap getStorageComputeMap() {
+        return storageComputePartitionsMap;
+    }
+
+    @Override
+    public synchronized void setComputeStoragePartitionsMap(StorageComputePartitionsMap map) {
+        this.storageComputePartitionsMap = map;
+    }
+
     private void updateClusterCounters(String nodeId, NcLocalCounters localCounters) {
         final IResourceIdManager resourceIdManager = appCtx.getResourceIdManager();
         resourceIdManager.report(nodeId, localCounters.getMaxResourceId());
@@ -518,6 +545,36 @@ public class ClusterStateManager implements IClusterStateManager {
                 .filter(partition -> partition.getActiveNodeId() != null && partition.getActiveNodeId().equals(nodeId))
                 .forEach(nodeActivePartition -> updateClusterPartition(nodeActivePartition.getPartitionId(), nodeId,
                         false));
+    }
+
+    private synchronized boolean isClusterUnusable() {
+        // if the cluster has no registered partitions or all partitions are pending activation -> UNUSABLE
+        if (clusterPartitions.isEmpty()
+                || clusterPartitions.values().stream().allMatch(ClusterPartition::isPendingActivation)) {
+            LOGGER.info("Cluster does not have any registered partitions");
+            return true;
+        }
+        if (appCtx.isCloudDeployment() && storageComputePartitionsMap != null) {
+            Set<String> computeNodes = storageComputePartitionsMap.getComputeNodes();
+            if (!participantNodes.containsAll(computeNodes)) {
+                LOGGER.info("Cluster missing compute nodes; required {}, current {}", computeNodes, participantNodes);
+                return true;
+            }
+        } else {
+            // exclude partitions that are pending activation
+            if (clusterPartitions.values().stream().anyMatch(p -> !p.isActive() && !p.isPendingActivation())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private synchronized void resetStorageComputeMap() {
+        if (storageComputePartitionsMap == null
+                && appCtx.getStorageProperties().getPartitioningScheme() == PartitioningScheme.STATIC
+                && !isClusterUnusable()) {
+            storageComputePartitionsMap = StorageComputePartitionsMap.computePartitionsMap(this);
+        }
     }
 
     private static InetSocketAddress getReplicaLocation(IClusterStateManager csm, String nodeId) {

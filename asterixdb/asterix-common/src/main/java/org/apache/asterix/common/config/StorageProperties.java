@@ -20,6 +20,7 @@ package org.apache.asterix.common.config;
 
 import static org.apache.hyracks.control.common.config.OptionTypes.BOOLEAN;
 import static org.apache.hyracks.control.common.config.OptionTypes.DOUBLE;
+import static org.apache.hyracks.control.common.config.OptionTypes.INTEGER;
 import static org.apache.hyracks.control.common.config.OptionTypes.INTEGER_BYTE_UNIT;
 import static org.apache.hyracks.control.common.config.OptionTypes.LONG_BYTE_UNIT;
 import static org.apache.hyracks.control.common.config.OptionTypes.NONNEGATIVE_INTEGER;
@@ -32,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.apache.asterix.common.metadata.MetadataIndexImmutableProperties;
+import org.apache.asterix.common.utils.PartitioningScheme;
 import org.apache.hyracks.api.config.IApplicationConfig;
 import org.apache.hyracks.api.config.IOption;
 import org.apache.hyracks.api.config.IOptionType;
@@ -56,12 +58,17 @@ public class StorageProperties extends AbstractProperties {
         STORAGE_COMPRESSION_BLOCK(STRING, "snappy"),
         STORAGE_DISK_FORCE_BYTES(LONG_BYTE_UNIT, StorageUtil.getLongSizeInBytes(16, MEGABYTE)),
         STORAGE_IO_SCHEDULER(STRING, "greedy"),
-        STORAGE_WRITE_RATE_LIMIT(LONG_BYTE_UNIT, 0l),
+        STORAGE_WRITE_RATE_LIMIT(LONG_BYTE_UNIT, 0L),
         STORAGE_MAX_CONCURRENT_FLUSHES_PER_PARTITION(NONNEGATIVE_INTEGER, 2),
         STORAGE_MAX_SCHEDULED_MERGES_PER_PARTITION(NONNEGATIVE_INTEGER, 8),
         STORAGE_MAX_CONCURRENT_MERGES_PER_PARTITION(NONNEGATIVE_INTEGER, 2),
         STORAGE_GLOBAL_CLEANUP(BOOLEAN, true),
-        STORAGE_GLOBAL_CLEANUP_TIMEOUT(POSITIVE_INTEGER, (int) TimeUnit.MINUTES.toSeconds(10));
+        STORAGE_GLOBAL_CLEANUP_TIMEOUT(POSITIVE_INTEGER, (int) TimeUnit.MINUTES.toSeconds(10)),
+        STORAGE_COLUMN_MAX_TUPLE_COUNT(NONNEGATIVE_INTEGER, 15000),
+        STORAGE_COLUMN_FREE_SPACE_TOLERANCE(DOUBLE, 0.15d),
+        STORAGE_FORMAT(STRING, "row"),
+        STORAGE_PARTITIONING(STRING, "dynamic"),
+        STORAGE_PARTITIONS_COUNT(INTEGER, 8);
 
         private final IOptionType interpreter;
         private final Object defaultValue;
@@ -74,10 +81,16 @@ public class StorageProperties extends AbstractProperties {
         @Override
         public Section section() {
             switch (this) {
+                case STORAGE_BUFFERCACHE_PAGESIZE:
                 case STORAGE_COMPRESSION_BLOCK:
                 case STORAGE_LSM_BLOOMFILTER_FALSEPOSITIVERATE:
                 case STORAGE_GLOBAL_CLEANUP:
                 case STORAGE_GLOBAL_CLEANUP_TIMEOUT:
+                case STORAGE_PARTITIONING:
+                case STORAGE_PARTITIONS_COUNT:
+                case STORAGE_FORMAT:
+                case STORAGE_COLUMN_MAX_TUPLE_COUNT:
+                case STORAGE_COLUMN_FREE_SPACE_TOLERANCE:
                     return Section.COMMON;
                 default:
                     return Section.NC;
@@ -129,6 +142,19 @@ public class StorageProperties extends AbstractProperties {
                     return "Indicates whether or not global storage cleanup is performed";
                 case STORAGE_GLOBAL_CLEANUP_TIMEOUT:
                     return "The maximum time to wait for nodes to respond to global storage cleanup requests";
+                case STORAGE_COLUMN_MAX_TUPLE_COUNT:
+                    return "The maximum number of tuples to be stored per a mega leaf page";
+                case STORAGE_COLUMN_FREE_SPACE_TOLERANCE:
+                    return "The percentage of the maximum tolerable empty space for a physical mega leaf page (e.g.,"
+                            + " 0.15 means a physical page with 15% or less empty space is tolerable)";
+                case STORAGE_FORMAT:
+                    return "The default storage format (either row or column)";
+                case STORAGE_PARTITIONING:
+                    return "The storage partitioning scheme (either dynamic or static). This value should not be"
+                            + " changed after any dataset has been created";
+                case STORAGE_PARTITIONS_COUNT:
+                    return "The number of storage partitions to use for static partitioning. This value should not be"
+                            + " changed after any dataset has been created";
                 default:
                     throw new IllegalStateException("NYI: " + this);
             }
@@ -264,5 +290,25 @@ public class StorageProperties extends AbstractProperties {
 
     public int getDiskForcePages() {
         return (int) (accessor.getLong(Option.STORAGE_DISK_FORCE_BYTES) / getBufferCachePageSize());
+    }
+
+    public int getColumnMaxTupleCount() {
+        return accessor.getInt(Option.STORAGE_COLUMN_MAX_TUPLE_COUNT);
+    }
+
+    public double getColumnFreeSpaceTolerance() {
+        return accessor.getDouble(Option.STORAGE_COLUMN_FREE_SPACE_TOLERANCE);
+    }
+
+    public String getStorageFormat() {
+        return accessor.getString(Option.STORAGE_FORMAT);
+    }
+
+    public PartitioningScheme getPartitioningScheme() {
+        return PartitioningScheme.fromName(accessor.getString(Option.STORAGE_PARTITIONING));
+    }
+
+    public int getStoragePartitionsCount() {
+        return accessor.getInt(Option.STORAGE_PARTITIONS_COUNT);
     }
 }

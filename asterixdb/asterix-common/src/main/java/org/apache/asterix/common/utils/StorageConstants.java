@@ -31,6 +31,7 @@ import org.apache.hyracks.storage.am.lsm.common.impls.ConcurrentMergePolicyFacto
 public class StorageConstants {
 
     public static final String STORAGE_ROOT_DIR_NAME = "storage";
+    public static final String INGESTION_LOGS_DIR_NAME = "ingestion_logs";
     public static final String PARTITION_DIR_PREFIX = "partition_";
     /**
      * Any file that shares the same directory as the LSM index files must
@@ -46,6 +47,7 @@ public class StorageConstants {
     public static final String DEFAULT_COMPACTION_POLICY_NAME = ConcurrentMergePolicyFactory.NAME;
     public static final String DEFAULT_FILTERED_DATASET_COMPACTION_POLICY_NAME = "correlated-prefix";
     public static final Map<String, String> DEFAULT_COMPACTION_POLICY_PROPERTIES;
+    public static final int METADATA_PARTITION = -1;
 
     /**
      * The storage version of AsterixDB related artifacts (e.g. log files, checkpoint files, etc..).

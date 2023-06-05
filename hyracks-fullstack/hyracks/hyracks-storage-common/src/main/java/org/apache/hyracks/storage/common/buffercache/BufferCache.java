@@ -43,7 +43,6 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.hyracks.api.lifecycle.ILifeCycleComponent;
 import org.apache.hyracks.api.replication.IIOReplicationManager;
 import org.apache.hyracks.api.util.ExceptionUtils;
-import org.apache.hyracks.api.util.IoUtil;
 import org.apache.hyracks.storage.common.compression.file.ICompressedPageWriter;
 import org.apache.hyracks.storage.common.file.BufferedFileHandle;
 import org.apache.hyracks.storage.common.file.IFileMapManager;
@@ -761,7 +760,7 @@ public class BufferCache implements IBufferCacheInternal, ILifeCycleComponent, I
         } catch (Exception e) {
             // If file registration failed for any reason, we need to undo the file creation
             try {
-                IoUtil.delete(fileRef);
+                ioManager.delete(fileRef);
             } catch (Exception deleteException) {
                 e.addSuppressed(deleteException);
             }
@@ -960,7 +959,7 @@ public class BufferCache implements IBufferCacheInternal, ILifeCycleComponent, I
         if (mapped) {
             deleteFile(fileId);
         } else {
-            BufferedFileHandle.deleteFile(fileRef);
+            BufferedFileHandle.deleteFile(fileRef, ioManager);
         }
     }
 
@@ -991,7 +990,7 @@ public class BufferCache implements IBufferCacheInternal, ILifeCycleComponent, I
                         fInfo.markAsDeleted();
                     }
                 } finally {
-                    BufferedFileHandle.deleteFile(fileRef);
+                    BufferedFileHandle.deleteFile(fileRef, ioManager);
                 }
             }
         }
@@ -1143,7 +1142,9 @@ public class BufferCache implements IBufferCacheInternal, ILifeCycleComponent, I
     }
 
     private ICachedPage confiscatePage(long dpid, int multiplier) throws HyracksDataException {
-        return getPageLoop(dpid, multiplier, true);
+        ICachedPage page = getPageLoop(dpid, multiplier, true);
+        page.getBuffer().clear();
+        return page;
     }
 
     private ICachedPage confiscateInner(long dpid, int multiplier) {

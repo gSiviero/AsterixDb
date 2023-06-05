@@ -27,6 +27,7 @@ import org.apache.asterix.transaction.management.opcallbacks.AbstractIndexModifi
 import org.apache.hyracks.algebricks.data.IBinaryIntegerInspector;
 import org.apache.hyracks.algebricks.data.IBinaryIntegerInspectorFactory;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
@@ -40,6 +41,7 @@ import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory
 import org.apache.hyracks.storage.am.common.ophelpers.IndexOperation;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
 import org.apache.hyracks.storage.am.lsm.common.dataflow.LSMIndexInsertUpdateDeleteOperatorNodePushable;
+import org.apache.hyracks.storage.common.IModificationOperationCallback;
 
 /**
  * This operator node is used for secondary indexes with upsert operations.
@@ -63,16 +65,15 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
 
     protected final int operationFieldIndex;
     protected final IBinaryIntegerInspector operationInspector;
-    protected AbstractIndexModificationOperationCallback abstractModCallback;
 
     public LSMSecondaryUpsertOperatorNodePushable(IHyracksTaskContext ctx, int partition,
             IIndexDataflowHelperFactory indexHelperFactory, IModificationOperationCallbackFactory modCallbackFactory,
             ITupleFilterFactory tupleFilterFactory, ITupleFilterFactory prevTupleFilterFactory, int[] fieldPermutation,
             RecordDescriptor inputRecDesc, int operationFieldIndex,
-            IBinaryIntegerInspectorFactory operationInspectorFactory, int[] prevTuplePermutation)
-            throws HyracksDataException {
+            IBinaryIntegerInspectorFactory operationInspectorFactory, int[] prevTuplePermutation,
+            ITuplePartitionerFactory tuplePartitionerFactory, int[][] partitionsMap) throws HyracksDataException {
         super(ctx, partition, indexHelperFactory, fieldPermutation, inputRecDesc, IndexOperation.UPSERT,
-                modCallbackFactory, tupleFilterFactory);
+                modCallbackFactory, tupleFilterFactory, tuplePartitionerFactory, partitionsMap);
         this.prevTuple.setFieldPermutation(prevTuplePermutation);
         this.operationFieldIndex = operationFieldIndex;
         this.operationInspector = operationInspectorFactory.createBinaryIntegerInspector(ctx);
@@ -85,7 +86,6 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
     public void open() throws HyracksDataException {
         super.open();
         frameTuple = new FrameTupleReference();
-        abstractModCallback = (AbstractIndexModificationOperationCallback) modCallback;
         if (prevTupleFilterFactory != null) {
             prevTupleFilter = prevTupleFilterFactory.createTupleFilter(ctx);
         }
@@ -94,12 +94,15 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
         accessor.reset(buffer);
-        ILSMIndexAccessor lsmAccessor = (ILSMIndexAccessor) indexAccessor;
         int tupleCount = accessor.getTupleCount();
         boolean tupleFilterIsNull = tupleFilter == null;
         boolean prevTupleFilterIsNull = prevTupleFilter == null;
         for (int i = 0; i < tupleCount; i++) {
             try {
+                int storagePartition = tuplePartitioner.partition(accessor, i);
+                int storageIdx = storagePartitionId2Index.get(storagePartition);
+                ILSMIndexAccessor lsmAccessor = (ILSMIndexAccessor) indexAccessors[storageIdx];
+                IModificationOperationCallback abstractModCallback = modCallbacks[storageIdx];
                 frameTuple.reset(accessor, i);
                 int operation = operationInspector.getIntegerValue(frameTuple.getFieldData(operationFieldIndex),
                         frameTuple.getFieldStart(operationFieldIndex), frameTuple.getFieldLength(operationFieldIndex));
@@ -108,23 +111,33 @@ public class LSMSecondaryUpsertOperatorNodePushable extends LSMIndexInsertUpdate
 
                 if (operation == UPSERT_NEW) {
                     if (tupleFilterIsNull || tupleFilter.accept(frameTuple)) {
-                        abstractModCallback.setOp(Operation.INSERT);
+                        if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                            ((AbstractIndexModificationOperationCallback) abstractModCallback).setOp(Operation.INSERT);
+                        }
                         lsmAccessor.forceInsert(tuple);
                     }
                 } else if (operation == UPSERT_EXISTING) {
                     if (!TupleUtils.equalTuples(tuple, prevTuple, numberOfFields)) {
                         if (prevTupleFilterIsNull || prevTupleFilter.accept(frameTuple)) {
-                            abstractModCallback.setOp(Operation.DELETE);
+                            if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                                ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                        .setOp(Operation.DELETE);
+                            }
                             lsmAccessor.forceDelete(prevTuple);
                         }
                         if (tupleFilterIsNull || tupleFilter.accept(frameTuple)) {
-                            abstractModCallback.setOp(Operation.INSERT);
+                            if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                                ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                        .setOp(Operation.INSERT);
+                            }
                             lsmAccessor.forceInsert(tuple);
                         }
                     }
                 } else if (operation == DELETE_EXISTING) {
                     if (prevTupleFilterIsNull || prevTupleFilter.accept(frameTuple)) {
-                        abstractModCallback.setOp(Operation.DELETE);
+                        if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                            ((AbstractIndexModificationOperationCallback) abstractModCallback).setOp(Operation.DELETE);
+                        }
                         lsmAccessor.forceDelete(prevTuple);
                     }
                 }

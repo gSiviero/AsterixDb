@@ -64,6 +64,7 @@ import org.apache.asterix.external.input.record.reader.abstracts.AbstractExterna
 import org.apache.asterix.external.library.JavaLibrary;
 import org.apache.asterix.external.library.msgpack.MessagePackUtils;
 import org.apache.asterix.external.util.ExternalDataConstants.ParquetOptions;
+import org.apache.asterix.external.util.aws.s3.S3Constants;
 import org.apache.asterix.external.util.aws.s3.S3Utils;
 import org.apache.asterix.om.types.ARecordType;
 import org.apache.asterix.om.types.ATypeTag;
@@ -72,8 +73,10 @@ import org.apache.asterix.om.types.EnumDeserializer;
 import org.apache.asterix.om.types.IAType;
 import org.apache.asterix.om.types.TypeTagUtil;
 import org.apache.asterix.runtime.evaluators.common.NumberUtils;
-import org.apache.asterix.runtime.projection.DataProjectionInfo;
+import org.apache.asterix.runtime.projection.DataProjectionFiltrationInfo;
 import org.apache.asterix.runtime.projection.FunctionCallInformation;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hyracks.algebricks.common.exceptions.AlgebricksException;
 import org.apache.hyracks.algebricks.common.exceptions.NotImplementedException;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.exceptions.IWarningCollector;
@@ -89,6 +92,11 @@ import org.apache.hyracks.dataflow.common.data.parsers.IntegerParserFactory;
 import org.apache.hyracks.dataflow.common.data.parsers.LongParserFactory;
 import org.apache.hyracks.dataflow.common.data.parsers.UTF8StringParserFactory;
 import org.apache.hyracks.util.StorageUtil;
+import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.io.CloseableIterable;
 
 public class ExternalDataUtils {
     private static final Map<ATypeTag, IValueParserFactory> valueParserFactoryMap = new EnumMap<>(ATypeTag.class);
@@ -242,7 +250,7 @@ public class ExternalDataUtils {
 
     public static boolean isTrue(Map<String, String> configuration, String key) {
         String value = configuration.get(key);
-        return value == null ? false : Boolean.valueOf(value);
+        return value != null && Boolean.valueOf(value);
     }
 
     // Currently not used.
@@ -315,10 +323,22 @@ public class ExternalDataUtils {
         }
     }
 
+    public static boolean isLogIngestionEvents(Map<String, String> configuration) {
+        if (!isFeed(configuration)) {
+            return false;
+        }
+        if (!configuration.containsKey(ExternalDataConstants.KEY_LOG_INGESTION_EVENTS)) {
+            return true;
+        } else {
+            return Boolean.parseBoolean(configuration.get(ExternalDataConstants.KEY_LOG_INGESTION_EVENTS));
+        }
+    }
+
     public static void prepareFeed(Map<String, String> configuration, DataverseName dataverseName, String feedName) {
         if (!configuration.containsKey(ExternalDataConstants.KEY_IS_FEED)) {
             configuration.put(ExternalDataConstants.KEY_IS_FEED, ExternalDataConstants.TRUE);
         }
+        configuration.computeIfAbsent(ExternalDataConstants.KEY_LOG_INGESTION_EVENTS, k -> ExternalDataConstants.TRUE);
         configuration.put(ExternalDataConstants.KEY_DATASET_DATAVERSE, dataverseName.getCanonicalForm());
         configuration.put(ExternalDataConstants.KEY_FEED_NAME, feedName);
     }
@@ -389,8 +409,7 @@ public class ExternalDataUtils {
     /**
      * Fills the configuration of the external dataset and its adapter with default values if not provided by user.
      *
-     * @param configuration
-     *            external data configuration
+     * @param configuration external data configuration
      */
     public static void defaultConfiguration(Map<String, String> configuration) {
         String format = configuration.get(ExternalDataConstants.KEY_FORMAT);
@@ -412,12 +431,10 @@ public class ExternalDataUtils {
      * Prepares the configuration of the external data and its adapter by filling the information required by
      * adapters and parsers.
      *
-     * @param adapterName
-     *            adapter name
-     * @param configuration
-     *            external data configuration
+     * @param adapterName   adapter name
+     * @param configuration external data configuration
      */
-    public static void prepare(String adapterName, Map<String, String> configuration) {
+    public static void prepare(String adapterName, Map<String, String> configuration) throws AlgebricksException {
         if (!configuration.containsKey(ExternalDataConstants.KEY_READER)) {
             configuration.put(ExternalDataConstants.KEY_READER, adapterName);
         }
@@ -431,14 +448,88 @@ public class ExternalDataUtils {
                 && configuration.containsKey(ExternalDataConstants.KEY_FORMAT)) {
             configuration.put(ExternalDataConstants.KEY_PARSER, configuration.get(ExternalDataConstants.KEY_FORMAT));
         }
+
+        if (configuration.containsKey(ExternalDataConstants.TABLE_FORMAT)) {
+            prepareTableFormat(configuration);
+        }
+    }
+
+    /**
+     * Prepares the configuration for data-lake table formats
+     *
+     * @param configuration
+     *            external data configuration
+     */
+    public static void prepareTableFormat(Map<String, String> configuration) throws AlgebricksException {
+        // Apache Iceberg table format
+        if (configuration.get(ExternalDataConstants.TABLE_FORMAT).equals(ExternalDataConstants.FORMAT_APACHE_ICEBERG)) {
+            Configuration conf = new Configuration();
+
+            String metadata_path = configuration.get(ExternalDataConstants.ICEBERG_METADATA_LOCATION);
+
+            // If the table is in S3
+            if (configuration.get(ExternalDataConstants.KEY_READER)
+                    .equals(ExternalDataConstants.KEY_ADAPTER_NAME_AWS_S3)) {
+
+                conf.set(S3Constants.HADOOP_ACCESS_KEY_ID, configuration.get(S3Constants.ACCESS_KEY_ID_FIELD_NAME));
+                conf.set(S3Constants.HADOOP_SECRET_ACCESS_KEY,
+                        configuration.get(S3Constants.SECRET_ACCESS_KEY_FIELD_NAME));
+                metadata_path = S3Constants.HADOOP_S3_PROTOCOL + "://"
+                        + configuration.get(ExternalDataConstants.CONTAINER_NAME_FIELD_NAME) + '/'
+                        + configuration.get(ExternalDataConstants.DEFINITION_FIELD_NAME);
+            } else if (configuration.get(ExternalDataConstants.KEY_READER).equals(ExternalDataConstants.READER_HDFS)) {
+                conf.set(ExternalDataConstants.KEY_HADOOP_FILESYSTEM_URI,
+                        configuration.get(ExternalDataConstants.KEY_HDFS_URL));
+                metadata_path = configuration.get(ExternalDataConstants.KEY_HDFS_URL) + '/' + metadata_path;
+            }
+
+            HadoopTables tables = new HadoopTables(conf);
+
+            Table icebergTable = tables.load(metadata_path);
+
+            if (icebergTable instanceof BaseTable) {
+                BaseTable baseTable = (BaseTable) icebergTable;
+
+                if (baseTable.operations().current()
+                        .formatVersion() != ExternalDataConstants.SUPPORTED_ICEBERG_FORMAT_VERSION) {
+                    throw new AsterixException(ErrorCode.UNSUPPORTED_ICEBERG_FORMAT_VERSION,
+                            "AsterixDB only supports Iceberg version up to "
+                                    + ExternalDataConstants.SUPPORTED_ICEBERG_FORMAT_VERSION);
+                }
+
+                try (CloseableIterable<FileScanTask> fileScanTasks = baseTable.newScan().planFiles()) {
+
+                    StringBuilder builder = new StringBuilder();
+
+                    for (FileScanTask task : fileScanTasks) {
+                        builder.append(",");
+                        String path = task.file().path().toString();
+                        builder.append(path);
+                    }
+
+                    if (builder.length() > 0) {
+                        builder.deleteCharAt(0);
+                    }
+
+                    configuration.put(ExternalDataConstants.KEY_PATH, builder.toString());
+
+                } catch (IOException e) {
+                    throw new AsterixException(ErrorCode.ERROR_READING_ICEBERG_METADATA, e);
+                }
+
+            } else {
+                throw new AsterixException(ErrorCode.UNSUPPORTED_ICEBERG_TABLE,
+                        "Invalid iceberg base table. Please remove metadata specifiers");
+            }
+
+        }
     }
 
     /**
      * Normalizes the values of certain parameters of the adapter configuration. This should happen before persisting
      * the metadata (e.g. when creating external datasets or feeds) and when creating an adapter factory.
      *
-     * @param configuration
-     *            external data configuration
+     * @param configuration external data configuration
      */
     public static void normalize(Map<String, String> configuration) {
         // normalize the "format" parameter
@@ -458,10 +549,8 @@ public class ExternalDataUtils {
     /**
      * Validates the parameter values of the adapter configuration. This should happen after normalizing the values.
      *
-     * @param configuration
-     *            external data configuration
-     * @throws HyracksDataException
-     *             HyracksDataException
+     * @param configuration external data configuration
+     * @throws HyracksDataException HyracksDataException
      */
     public static void validate(Map<String, String> configuration) throws HyracksDataException {
         String format = configuration.get(ExternalDataConstants.KEY_FORMAT);
@@ -523,8 +612,7 @@ public class ExternalDataUtils {
      * Validates adapter specific external dataset properties. Specific properties for different adapters should be
      * validated here
      *
-     * @param configuration
-     *            properties
+     * @param configuration properties
      */
     public static void validateAdapterSpecificProperties(Map<String, String> configuration, SourceLocation srcLoc,
             IWarningCollector collector, IApplicationContext appCtx) throws CompilationException {
@@ -552,8 +640,7 @@ public class ExternalDataUtils {
     /**
      * Regex matches all the provided patterns against the provided path
      *
-     * @param path
-     *            path to check against
+     * @param path path to check against
      * @return {@code true} if all patterns match, {@code false} otherwise
      */
     public static boolean matchPatterns(List<Matcher> matchers, String path) {
@@ -568,8 +655,7 @@ public class ExternalDataUtils {
     /**
      * Converts the wildcard to proper regex
      *
-     * @param pattern
-     *            wildcard pattern to convert
+     * @param pattern wildcard pattern to convert
      * @return regex expression
      */
     public static String patternToRegex(String pattern) {
@@ -658,8 +744,7 @@ public class ExternalDataUtils {
     /**
      * Adjusts the prefix (if needed) and returns it
      *
-     * @param configuration
-     *            configuration
+     * @param configuration configuration
      */
     public static String getPrefix(Map<String, String> configuration) {
         return getPrefix(configuration, true);
@@ -692,10 +777,8 @@ public class ExternalDataUtils {
     }
 
     /**
-     * @param configuration
-     *            configuration map
-     * @throws CompilationException
-     *             Compilation exception
+     * @param configuration configuration map
+     * @throws CompilationException Compilation exception
      */
     public static void validateIncludeExclude(Map<String, String> configuration) throws CompilationException {
         // Ensure that include and exclude are not provided at the same time + ensure valid format or property
@@ -779,10 +862,8 @@ public class ExternalDataUtils {
     /**
      * Validate Parquet dataset's declared type and configuration
      *
-     * @param properties
-     *            external dataset configuration
-     * @param datasetRecordType
-     *            dataset declared type
+     * @param properties        external dataset configuration
+     * @param datasetRecordType dataset declared type
      */
     public static void validateParquetTypeAndConfiguration(Map<String, String> properties,
             ARecordType datasetRecordType) throws CompilationException {
@@ -804,8 +885,8 @@ public class ExternalDataUtils {
                 || ExternalDataConstants.FORMAT_PARQUET.equals(properties.get(ExternalDataConstants.KEY_FORMAT));
     }
 
-    public static void setExternalDataProjectionInfo(DataProjectionInfo projectionInfo, Map<String, String> properties)
-            throws IOException {
+    public static void setExternalDataProjectionInfo(DataProjectionFiltrationInfo projectionInfo,
+            Map<String, String> properties) throws IOException {
         properties.put(ExternalDataConstants.KEY_REQUESTED_FIELDS,
                 serializeExpectedTypeToString(projectionInfo.getProjectionInfo()));
         properties.put(ExternalDataConstants.KEY_HADOOP_ASTERIX_FUNCTION_CALL_INFORMATION,
@@ -815,19 +896,19 @@ public class ExternalDataUtils {
     /**
      * Serialize {@link ARecordType} as Base64 string to pass it to {@link org.apache.hadoop.conf.Configuration}
      *
-     * @param expectedType
-     *            expected type
+     * @param expectedType expected type
      * @return the expected type as Base64 string
      */
     private static String serializeExpectedTypeToString(ARecordType expectedType) throws IOException {
-        if (expectedType == DataProjectionInfo.EMPTY_TYPE || expectedType == DataProjectionInfo.ALL_FIELDS_TYPE) {
+        if (expectedType == DataProjectionFiltrationInfo.EMPTY_TYPE
+                || expectedType == DataProjectionFiltrationInfo.ALL_FIELDS_TYPE) {
             //Return the type name of EMPTY_TYPE and ALL_FIELDS_TYPE
             return expectedType.getTypeName();
         }
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);
         Base64.Encoder encoder = Base64.getEncoder();
-        DataProjectionInfo.writeTypeField(expectedType, dataOutputStream);
+        DataProjectionFiltrationInfo.writeTypeField(expectedType, dataOutputStream);
         return encoder.encodeToString(byteArrayOutputStream.toByteArray());
     }
 
@@ -835,8 +916,7 @@ public class ExternalDataUtils {
      * Serialize {@link FunctionCallInformation} map as Base64 string to pass it to
      * {@link org.apache.hadoop.conf.Configuration}
      *
-     * @param functionCallInfoMap
-     *            function information map
+     * @param functionCallInfoMap function information map
      * @return function information map as Base64 string
      */
     static String serializeFunctionCallInfoToString(Map<String, FunctionCallInformation> functionCallInfoMap)
@@ -844,7 +924,7 @@ public class ExternalDataUtils {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);
         Base64.Encoder encoder = Base64.getEncoder();
-        DataProjectionInfo.writeFunctionCallInformationMapField(functionCallInfoMap, dataOutputStream);
+        DataProjectionFiltrationInfo.writeFunctionCallInformationMapField(functionCallInfoMap, dataOutputStream);
         return encoder.encodeToString(byteArrayOutputStream.toByteArray());
     }
 

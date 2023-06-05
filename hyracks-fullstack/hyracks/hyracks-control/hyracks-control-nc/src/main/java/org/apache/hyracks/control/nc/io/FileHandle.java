@@ -30,7 +30,7 @@ import org.apache.hyracks.api.io.IIOManager;
 
 public class FileHandle implements IFileHandle {
 
-    private final FileReference fileRef;
+    protected final FileReference fileRef;
     private RandomAccessFile raf;
     private String mode;
 
@@ -90,6 +90,14 @@ public class FileHandle implements IFileHandle {
 
     public FileChannel getFileChannel() {
         return raf.getChannel();
+    }
+
+    public void setLength(long newLength) throws HyracksDataException {
+        try {
+            raf.setLength(newLength);
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
     }
 
     public synchronized void ensureOpen() throws HyracksDataException {

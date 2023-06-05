@@ -31,6 +31,7 @@ import org.apache.hyracks.algebricks.runtime.operators.meta.PipelineAssembler;
 import org.apache.hyracks.algebricks.runtime.operators.std.NestedTupleSourceRuntimeFactory.NestedTupleSourceRuntime;
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksTaskContext;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionerFactory;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
@@ -40,6 +41,7 @@ import org.apache.hyracks.storage.am.common.api.IModificationOperationCallbackFa
 import org.apache.hyracks.storage.am.common.dataflow.IIndexDataflowHelperFactory;
 import org.apache.hyracks.storage.am.common.tuples.ConcatenatingTupleReference;
 import org.apache.hyracks.storage.am.lsm.common.api.ILSMIndexAccessor;
+import org.apache.hyracks.storage.common.IModificationOperationCallback;
 
 public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSecondaryUpsertOperatorNodePushable {
     private final NestedTupleSourceRuntime[] startOfNewKeyPipelines;
@@ -50,9 +52,10 @@ public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSec
             IIndexDataflowHelperFactory indexHelperFactory, IModificationOperationCallbackFactory modCallbackFactory,
             int[] fieldPermutation, RecordDescriptor inputRecDesc, int operationFieldIndex,
             IBinaryIntegerInspectorFactory operationInspectorFactory, List<AlgebricksPipeline> secondaryKeysPipeline,
-            List<AlgebricksPipeline> prevSecondaryKeysPipeline) throws HyracksDataException {
+            List<AlgebricksPipeline> prevSecondaryKeysPipeline, ITuplePartitionerFactory tuplePartitionerFactory,
+            int[][] partitionsMap) throws HyracksDataException {
         super(ctx, partition, indexHelperFactory, modCallbackFactory, null, null, fieldPermutation, inputRecDesc,
-                operationFieldIndex, operationInspectorFactory, null);
+                operationFieldIndex, operationInspectorFactory, null, tuplePartitionerFactory, partitionsMap);
         this.numberOfPrimaryKeyAndFilterFields = fieldPermutation.length;
         this.startOfNewKeyPipelines = buildStartOfPipelines(secondaryKeysPipeline, inputRecDesc, false);
         this.startOfPrevKeyPipelines = buildStartOfPipelines(prevSecondaryKeysPipeline, inputRecDesc, true);
@@ -94,7 +97,6 @@ public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSec
     public void open() throws HyracksDataException {
         super.open();
         frameTuple = new FrameTupleReference();
-        abstractModCallback = (AbstractIndexModificationOperationCallback) modCallback;
     }
 
     @Override
@@ -168,7 +170,6 @@ public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSec
 
         @Override
         public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-            ILSMIndexAccessor workingLSMAccessor = (ILSMIndexAccessor) indexAccessor;
 
             endOfPipelineTupleAccessor.reset(buffer);
             int nTuple = endOfPipelineTupleAccessor.getTupleCount();
@@ -187,9 +188,16 @@ public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSec
                 // Add the primary keys and filter fields.
                 endTupleReference.addTuple(tuple);
 
+                int storagePartition = tuplePartitioner.partition(tuple.getFrameTupleAccessor(), tuple.getTupleIndex());
+                int storageIdx = storagePartitionId2Index.get(storagePartition);
+                ILSMIndexAccessor workingLSMAccessor = (ILSMIndexAccessor) indexAccessors[storageIdx];
+                IModificationOperationCallback abstractModCallback = modCallbacks[storageIdx];
                 // Finally, pass the tuple to our accessor. There are only two operations: insert or delete.
                 if (this.isInsert) {
-                    abstractModCallback.setOp(AbstractIndexModificationOperationCallback.Operation.INSERT);
+                    if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                        ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                .setOp(AbstractIndexModificationOperationCallback.Operation.INSERT);
+                    }
                     try {
                         workingLSMAccessor.forceInsert(endTupleReference);
                     } catch (HyracksDataException e) {
@@ -198,7 +206,10 @@ public class LSMSecondaryUpsertWithNestedPlanOperatorNodePushable extends LSMSec
                         }
                     }
                 } else {
-                    abstractModCallback.setOp(AbstractIndexModificationOperationCallback.Operation.DELETE);
+                    if (abstractModCallback instanceof AbstractIndexModificationOperationCallback) {
+                        ((AbstractIndexModificationOperationCallback) abstractModCallback)
+                                .setOp(AbstractIndexModificationOperationCallback.Operation.DELETE);
+                    }
                     workingLSMAccessor.forceDelete(endTupleReference);
                 }
             }

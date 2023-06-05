@@ -69,6 +69,7 @@ import org.apache.asterix.lang.common.statement.AnalyzeDropStatement;
 import org.apache.asterix.lang.common.statement.AnalyzeStatement;
 import org.apache.asterix.lang.common.statement.CompactStatement;
 import org.apache.asterix.lang.common.statement.ConnectFeedStatement;
+import org.apache.asterix.lang.common.statement.CopyStatement;
 import org.apache.asterix.lang.common.statement.CreateAdapterStatement;
 import org.apache.asterix.lang.common.statement.CreateDataverseStatement;
 import org.apache.asterix.lang.common.statement.CreateFeedPolicyStatement;
@@ -110,7 +111,6 @@ import org.apache.asterix.lang.common.statement.TypeDropStatement;
 import org.apache.asterix.lang.common.statement.UpdateStatement;
 import org.apache.asterix.lang.common.statement.ViewDecl;
 import org.apache.asterix.lang.common.statement.ViewDropStatement;
-import org.apache.asterix.lang.common.statement.WriteStatement;
 import org.apache.asterix.lang.common.struct.Identifier;
 import org.apache.asterix.lang.common.struct.OperatorType;
 import org.apache.asterix.lang.common.struct.QuantifiedPair;
@@ -510,16 +510,6 @@ public abstract class FormatPrintVisitor implements ILangVisitor<Void, Integer> 
     }
 
     @Override
-    public Void visit(WriteStatement ws, Integer step) throws CompilationException {
-        out.print(skip(step) + "write output to " + ws.getNcName() + ":" + revertStringToQuoted(ws.getFileName()));
-        if (ws.getWriterClassName() != null) {
-            out.print(" using " + ws.getWriterClassName());
-        }
-        out.println();
-        return null;
-    }
-
-    @Override
     public Void visit(SetStatement ss, Integer step) throws CompilationException {
         out.println(skip(step) + "set " + revertStringToQuoted(ss.getPropName()) + " "
                 + revertStringToQuoted(ss.getPropValue()) + ";\n");
@@ -551,6 +541,16 @@ public abstract class FormatPrintVisitor implements ILangVisitor<Void, Integer> 
                 + revertStringToQuoted(stmtLoad.getAdapter()) + " ");
         printConfiguration(stmtLoad.getProperties());
         out.println(stmtLoad.dataIsAlreadySorted() ? " pre-sorted" + SEMICOLON : SEMICOLON);
+        out.println();
+        return null;
+    }
+
+    @Override
+    public Void visit(CopyStatement stmtCopy, Integer step) throws CompilationException {
+        out.print(skip(step) + "copy " + datasetSymbol
+                + generateFullName(stmtCopy.getDataverseName(), stmtCopy.getDatasetName()) + " using "
+                + revertStringToQuoted(stmtCopy.getExternalDetails().getAdapter()) + " ");
+        printConfiguration(stmtCopy.getExternalDetails().getProperties());
         out.println();
         return null;
     }

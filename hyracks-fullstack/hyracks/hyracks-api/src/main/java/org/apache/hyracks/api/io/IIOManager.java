@@ -19,34 +19,38 @@
 package org.apache.hyracks.api.io;
 
 import java.io.Closeable;
+import java.io.FilenameFilter;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.WritableByteChannel;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 
 public interface IIOManager extends Closeable {
-    public enum FileReadWriteMode {
+
+    enum FileReadWriteMode {
         READ_ONLY,
         READ_WRITE
     }
 
-    public enum FileSyncMode {
+    enum FileSyncMode {
         METADATA_SYNC_DATA_SYNC,
         METADATA_ASYNC_DATA_SYNC,
         METADATA_ASYNC_DATA_ASYNC
     }
 
-    public List<IODeviceHandle> getIODevices();
+    List<IODeviceHandle> getIODevices();
 
-    public IFileHandle open(FileReference fileRef, FileReadWriteMode rwMode, FileSyncMode syncMode)
+    IFileHandle open(FileReference fileRef, FileReadWriteMode rwMode, FileSyncMode syncMode)
             throws HyracksDataException;
 
-    public int syncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
+    int syncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
-    public long syncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException;
+    long syncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException;
 
-    public int syncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
+    int syncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
     IAsyncRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
@@ -54,17 +58,19 @@ public interface IIOManager extends Closeable {
 
     IAsyncRequest asyncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
-    public void close(IFileHandle fHandle) throws HyracksDataException;
+    void close(IFileHandle fHandle) throws HyracksDataException;
 
-    public void sync(IFileHandle fileHandle, boolean metadata) throws HyracksDataException;
+    void sync(IFileHandle fileHandle, boolean metadata) throws HyracksDataException;
 
-    public void truncate(IFileHandle fileHandle, long size) throws HyracksDataException;
+    void truncate(IFileHandle fileHandle, long size) throws HyracksDataException;
 
-    public long getSize(IFileHandle fileHandle);
+    long getSize(IFileHandle fileHandle) throws HyracksDataException;
 
-    public WritableByteChannel newWritableChannel(IFileHandle fileHandle);
+    long getSize(FileReference fileReference) throws HyracksDataException;
 
-    public void deleteWorkspaceFiles() throws HyracksDataException;
+    WritableByteChannel newWritableChannel(IFileHandle fileHandle);
+
+    void deleteWorkspaceFiles() throws HyracksDataException;
 
     /**
      * @param ioDeviceId
@@ -85,11 +91,10 @@ public interface IIOManager extends Closeable {
     /**
      * Gets a file reference from an absolute path
      *
-     * @deprecated
-     *             use getFileRef(int ioDeviceId, String path) instead
      * @param path
      * @return A file reference based on the mounting point of {@code ioDeviceId} and the passed {@code relativePath}
      * @throws HyracksDataException
+     * @deprecated use getFileRef(int ioDeviceId, String path) instead
      */
     @Deprecated
     FileReference resolveAbsolutePath(String path) throws HyracksDataException;
@@ -109,4 +114,41 @@ public interface IIOManager extends Closeable {
      * @return the total disk usage in bytes
      */
     long getTotalDiskUsage();
+
+    /**
+     * Delete any additional artifacts associated with the file reference
+     *
+     * @param fileRef
+     */
+    void delete(FileReference fileRef) throws HyracksDataException;
+
+    Set<FileReference> list(FileReference dir) throws HyracksDataException;
+
+    /**
+     * Lists the files matching {@code filter} recursively starting from {@code dir}
+     * @param dir
+     * @param filter
+     * @return the matching files
+     * @throws HyracksDataException
+     */
+    Set<FileReference> list(FileReference dir, FilenameFilter filter) throws HyracksDataException;
+
+    void overwrite(FileReference fileRef, byte[] bytes) throws ClosedByInterruptException, HyracksDataException;
+
+    byte[] readAllBytes(FileReference fileRef) throws HyracksDataException;
+
+    void copyDirectory(FileReference srcMetadataScopePath, FileReference targetMetadataScopePath)
+            throws HyracksDataException;
+
+    void deleteDirectory(FileReference root) throws HyracksDataException;
+
+    boolean exists(FileReference fileRef) throws HyracksDataException;
+
+    void create(FileReference fileRef) throws HyracksDataException;
+
+    boolean makeDirectories(FileReference resourceDir);
+
+    void cleanDirectory(FileReference resourceDir) throws HyracksDataException;
+
+    void syncFiles(Set<Integer> activePartitions) throws HyracksDataException;
 }

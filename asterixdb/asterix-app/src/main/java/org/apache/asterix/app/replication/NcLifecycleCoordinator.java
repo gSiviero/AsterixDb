@@ -83,8 +83,10 @@ public class NcLifecycleCoordinator implements INcLifecycleCoordinator {
     private final boolean replicationEnabled;
     private final IGatekeeper gatekeeper;
     Map<String, Map<String, Object>> nodeSecretsMap;
+    private ICCServiceContext serviceContext;
 
     public NcLifecycleCoordinator(ICCServiceContext serviceCtx, boolean replicationEnabled) {
+        this.serviceContext = serviceCtx;
         this.messageBroker = (ICCMessageBroker) serviceCtx.getMessageBroker();
         this.replicationEnabled = replicationEnabled;
         this.gatekeeper =

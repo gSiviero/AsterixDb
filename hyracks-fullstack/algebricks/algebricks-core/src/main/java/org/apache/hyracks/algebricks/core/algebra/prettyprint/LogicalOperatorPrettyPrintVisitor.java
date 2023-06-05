@@ -33,7 +33,7 @@ import org.apache.hyracks.algebricks.core.algebra.base.ILogicalPlan;
 import org.apache.hyracks.algebricks.core.algebra.base.IPhysicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
-import org.apache.hyracks.algebricks.core.algebra.metadata.IProjectionInfo;
+import org.apache.hyracks.algebricks.core.algebra.metadata.IProjectionFiltrationInfo;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractOperatorWithNestedPlans;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractUnnestMapOperator;
@@ -74,7 +74,6 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOpe
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WindowOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteOperator;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteResultOperator;
 
 public class LogicalOperatorPrettyPrintVisitor extends AbstractLogicalOperatorPrettyPrintVisitor<Integer>
         implements IPlanPrettyPrinter {
@@ -271,14 +270,6 @@ public class LogicalOperatorPrettyPrintVisitor extends AbstractLogicalOperatorPr
     }
 
     @Override
-    public Void visitWriteResultOperator(WriteResultOperator op, Integer indent) throws AlgebricksException {
-        addIndent(indent).append("load ").append(str(op.getDataSource())).append(" from ")
-                .append(op.getPayloadExpression().getValue().accept(exprVisitor, indent)).append(" partitioned by ");
-        pprintExprList(op.getKeyExpressions(), indent);
-        return null;
-    }
-
-    @Override
     public Void visitSelectOperator(SelectOperator op, Integer indent) throws AlgebricksException {
         String retainMissing = op.getMissingPlaceholderVariable() != null
                 ? " retain-untrue (" + op.getMissingPlaceholderVariable() + " <- " + op.getRetainMissingAsValue() + ")"
@@ -359,6 +350,9 @@ public class LogicalOperatorPrettyPrintVisitor extends AbstractLogicalOperatorPr
         AlgebricksStringBuilderWriter plan = printAbstractUnnestMapOperator(op, indent, "unnest-map", null);
         appendSelectConditionInformation(plan, op.getSelectCondition(), indent);
         appendLimitInformation(plan, op.getOutputLimit());
+        appendProjectInformation(plan, "project", op.getDatasetProjectionInfo());
+        appendProjectInformation(plan, "project-meta", op.getMetaProjectionInfo());
+        appendFilterExpression(plan, op.getDatasetProjectionInfo());
         return null;
     }
 
@@ -386,7 +380,9 @@ public class LogicalOperatorPrettyPrintVisitor extends AbstractLogicalOperatorPr
         appendFilterInformation(plan, op.getMinFilterVars(), op.getMaxFilterVars());
         appendSelectConditionInformation(plan, op.getSelectCondition(), indent);
         appendLimitInformation(plan, op.getOutputLimit());
-        appendProjectInformation(plan, op.getProjectionInfo());
+        appendProjectInformation(plan, "project", op.getDatasetProjectionInfo());
+        appendProjectInformation(plan, "project-meta", op.getMetaProjectionInfo());
+        appendFilterExpression(plan, op.getDatasetProjectionInfo());
         return null;
     }
 
@@ -417,11 +413,26 @@ public class LogicalOperatorPrettyPrintVisitor extends AbstractLogicalOperatorPr
         }
     }
 
-    private void appendProjectInformation(AlgebricksStringBuilderWriter plan, IProjectionInfo<?> projectionInfo) {
+    private void appendProjectInformation(AlgebricksStringBuilderWriter plan, String projectionSource,
+            IProjectionFiltrationInfo<?> projectionInfo) {
         final String projectedFields = projectionInfo == null ? "" : projectionInfo.toString();
         if (!projectedFields.isEmpty()) {
-            plan.append(" project (");
+            plan.append(" ");
+            plan.append(projectionSource);
+            plan.append(" (");
             plan.append(projectedFields);
+            plan.append(")");
+        }
+    }
+
+    private void appendFilterExpression(AlgebricksStringBuilderWriter plan,
+            IProjectionFiltrationInfo<?> projectionInfo) {
+        final String filterExpr = projectionInfo == null || projectionInfo.getFilterExpression() == null ? ""
+                : projectionInfo.getFilterExpression().toString();
+        if (!filterExpr.isEmpty()) {
+            plan.append(" filter on ");
+            plan.append("(");
+            plan.append(filterExpr);
             plan.append(")");
         }
     }

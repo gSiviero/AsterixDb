@@ -38,7 +38,7 @@ import org.apache.hyracks.algebricks.core.algebra.base.IPhysicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.base.LogicalVariable;
 import org.apache.hyracks.algebricks.core.algebra.base.PhysicalOperatorTag;
 import org.apache.hyracks.algebricks.core.algebra.expressions.IAlgebricksConstantValue;
-import org.apache.hyracks.algebricks.core.algebra.metadata.IProjectionInfo;
+import org.apache.hyracks.algebricks.core.algebra.metadata.IProjectionFiltrationInfo;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractBinaryJoinOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractLogicalOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.AbstractOperatorWithNestedPlans;
@@ -81,7 +81,6 @@ import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestMapOpe
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.UnnestOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WindowOperator;
 import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteOperator;
-import org.apache.hyracks.algebricks.core.algebra.operators.logical.WriteResultOperator;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 
 import com.fasterxml.jackson.core.JsonFactory;
@@ -434,19 +433,6 @@ public class LogicalOperatorPrettyPrintVisitorJson extends AbstractLogicalOperat
     }
 
     @Override
-    public Void visitWriteResultOperator(WriteResultOperator op, Void indent) throws AlgebricksException {
-        try {
-            jsonGenerator.writeStringField(OPERATOR_FIELD, "load");
-            jsonGenerator.writeStringField("data-source", String.valueOf(op.getDataSource()));
-            writeStringFieldExpression("from", op.getPayloadExpression(), indent);
-            writeObjectFieldWithExpressions("partitioned-by", op.getKeyExpressions(), indent);
-            return null;
-        } catch (IOException e) {
-            throw AlgebricksException.create(ErrorCode.ERROR_PRINTING_PLAN, e, String.valueOf(e));
-        }
-    }
-
-    @Override
     public Void visitSelectOperator(SelectOperator op, Void indent) throws AlgebricksException {
         try {
             jsonGenerator.writeStringField(OPERATOR_FIELD, "select");
@@ -545,6 +531,9 @@ public class LogicalOperatorPrettyPrintVisitorJson extends AbstractLogicalOperat
         try {
             writeUnnestMapOperator(op, indent, "unnest-map", null);
             writeSelectLimitInformation(op.getSelectCondition(), op.getOutputLimit(), indent);
+            writeProjectInformation("project", op.getDatasetProjectionInfo());
+            writeProjectInformation("project-meta", op.getMetaProjectionInfo());
+            writeFilterInformation(op.getDatasetProjectionInfo());
             return null;
         } catch (IOException e) {
             throw AlgebricksException.create(ErrorCode.ERROR_PRINTING_PLAN, e, String.valueOf(e));
@@ -574,7 +563,9 @@ public class LogicalOperatorPrettyPrintVisitorJson extends AbstractLogicalOperat
             }
             writeFilterInformation(op.getMinFilterVars(), op.getMaxFilterVars());
             writeSelectLimitInformation(op.getSelectCondition(), op.getOutputLimit(), indent);
-            writeProjectInformation(op.getProjectionInfo());
+            writeProjectInformation("project", op.getDatasetProjectionInfo());
+            writeProjectInformation("project-meta", op.getMetaProjectionInfo());
+            writeFilterInformation(op.getDatasetProjectionInfo());
             return null;
         } catch (IOException e) {
             throw AlgebricksException.create(ErrorCode.ERROR_PRINTING_PLAN, e, String.valueOf(e));
@@ -903,10 +894,19 @@ public class LogicalOperatorPrettyPrintVisitorJson extends AbstractLogicalOperat
         }
     }
 
-    private void writeProjectInformation(IProjectionInfo<?> projectionInfo) throws IOException {
+    private void writeProjectInformation(String projectionSource, IProjectionFiltrationInfo<?> projectionInfo)
+            throws IOException {
         final String projectedFields = projectionInfo == null ? "" : projectionInfo.toString();
         if (!projectedFields.isEmpty()) {
-            jsonGenerator.writeStringField("project", projectedFields);
+            jsonGenerator.writeStringField(projectionSource, projectedFields);
+        }
+    }
+
+    private void writeFilterInformation(IProjectionFiltrationInfo<?> projectionInfo) throws IOException {
+        final String filterExpr = projectionInfo == null || projectionInfo.getFilterExpression() == null ? ""
+                : projectionInfo.getFilterExpression().toString();
+        if (!filterExpr.isEmpty()) {
+            jsonGenerator.writeStringField("filter-on", filterExpr);
         }
     }
 

@@ -74,11 +74,12 @@ public class DataSourceScanPOperator extends AbstractScanPOperator {
     }
 
     @Override
-    public void computeDeliveredProperties(ILogicalOperator op, IOptimizationContext context) {
+    public void computeDeliveredProperties(ILogicalOperator op, IOptimizationContext context)
+            throws AlgebricksException {
         // partitioning properties
         DataSourceScanOperator dssOp = (DataSourceScanOperator) op;
         IDataSourcePropertiesProvider dspp = dataSource.getPropertiesProvider();
-        deliveredProperties = dspp.computePropertiesVector(dssOp.getVariables());
+        deliveredProperties = dspp.computeDeliveredProperties(dssOp.getVariables(), context);
     }
 
     @Override
@@ -116,16 +117,14 @@ public class DataSourceScanPOperator extends AbstractScanPOperator {
                     scan.getSelectCondition().getValue(), context);
         }
 
-        Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> p =
-                mp.getScannerRuntime(dataSource, vars, projectVars, scan.isProjectPushed(), scan.getMinFilterVars(),
-                        scan.getMaxFilterVars(), tupleFilterFactory, scan.getOutputLimit(), opSchema, typeEnv, context,
-                        builder.getJobSpec(), implConfig, scan.getProjectionInfo());
+        Pair<IOperatorDescriptor, AlgebricksPartitionConstraint> p = mp.getScannerRuntime(dataSource, vars, projectVars,
+                scan.isProjectPushed(), scan.getMinFilterVars(), scan.getMaxFilterVars(), tupleFilterFactory,
+                scan.getOutputLimit(), opSchema, typeEnv, context, builder.getJobSpec(), implConfig,
+                scan.getDatasetProjectionInfo(), scan.getMetaProjectionInfo());
         IOperatorDescriptor opDesc = p.first;
         opDesc.setSourceLocation(scan.getSourceLocation());
         builder.contributeHyracksOperator(scan, opDesc);
-        if (p.second != null) {
-            builder.contributeAlgebricksPartitionConstraint(opDesc, p.second);
-        }
+        builder.contributeAlgebricksPartitionConstraint(opDesc, p.second);
 
         ILogicalOperator srcExchange = scan.getInputs().get(0).getValue();
         builder.contributeGraphEdge(srcExchange, 0, scan, 0);
