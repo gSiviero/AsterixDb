@@ -327,8 +327,8 @@ public class VPartitionTupleBufferManager implements IPartitionedTupleBufferMana
     }
 
     @Override
-    public void allocateEmptyFrame(int partitionId) throws HyracksDataException{
-        getLastBufferOrCreateNewIfNotExist(partitionId,0,0);
+    public void allocateEmptyFrame(int partitionId) throws HyracksDataException {
+        getLastBufferOrCreateNewIfNotExist(partitionId, 0, 0);
     }
 
 }

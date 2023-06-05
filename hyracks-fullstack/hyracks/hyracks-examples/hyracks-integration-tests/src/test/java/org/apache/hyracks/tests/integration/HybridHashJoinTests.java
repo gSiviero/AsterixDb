@@ -1,8 +1,41 @@
-package org.apache.hyracks.tests.unit.HHJPartitionsTest;
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.hyracks.tests.integration;
 
-import org.apache.hyracks.api.comm.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.util.Random;
+
+import org.apache.hyracks.api.comm.IFrame;
+import org.apache.hyracks.api.comm.IFrameTupleAccessor;
+import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
-import org.apache.hyracks.api.dataflow.value.*;
+import org.apache.hyracks.api.dataflow.value.IMissingWriter;
+import org.apache.hyracks.api.dataflow.value.IMissingWriterFactory;
+import org.apache.hyracks.api.dataflow.value.IPredicateEvaluator;
+import org.apache.hyracks.api.dataflow.value.ISerializerDeserializer;
+import org.apache.hyracks.api.dataflow.value.ITuplePairComparator;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionComputer;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.dataflow.common.comm.io.ArrayTupleBuilder;
@@ -13,20 +46,18 @@ import org.apache.hyracks.dataflow.common.data.marshalling.IntegerSerializerDese
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.common.utils.TupleUtils;
-import org.apache.hyracks.dataflow.std.join.*;
+import org.apache.hyracks.dataflow.std.join.IHybridHashJoin;
+import org.apache.hyracks.dataflow.std.join.OptimizedHybridHashJoin;
 import org.apache.hyracks.test.support.TestUtils;
-import org.junit.jupiter.api.Test;
-
-import java.util.Random;
-
-import static org.junit.Assert.*;
+import org.junit.Test;
 
 public class HybridHashJoinTests {
     int numberOfPartitions = 5;
     int frameSize = 32768;
     int memorySizeInFrames = 10;
     IHyracksJobletContext context = TestUtils.create(frameSize).getJobletContext();
-    RecordDescriptor buildRecordDescriptor = new RecordDescriptor(new ISerializerDeserializer[]{IntegerSerializerDeserializer.INSTANCE});
+    RecordDescriptor buildRecordDescriptor =
+            new RecordDescriptor(new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE });
     IMissingWriterFactory dummyMissingWriters[] = new dummyMissingWriterFactory[2];
     IHybridHashJoin dmhhj;
     IHybridHashJoin hhj;
@@ -36,15 +67,15 @@ public class HybridHashJoinTests {
     public void contructorTest() {
         try {
             dmhhj = new org.apache.hyracks.dataflow.std.join.HybridHashJoin(context, memorySizeInFrames,
-                    numberOfPartitions, "RelS", "RelR", buildRecordDescriptor,
-                    buildRecordDescriptor, new simplePartitionComputer(), new simplePartitionComputer(),
-                    new dummyPredicateEvaluator(), new dummyPredicateEvaluator(), false, dummyMissingWriters);
+                    numberOfPartitions, "RelS", "RelR", buildRecordDescriptor, buildRecordDescriptor,
+                    new simplePartitionComputer(), new simplePartitionComputer(), new dummyPredicateEvaluator(),
+                    new dummyPredicateEvaluator(), false, dummyMissingWriters);
 
             assertNotNull(dmhhj);
-            hhj = new OptimizedHybridHashJoin(context, memorySizeInFrames,
-                    numberOfPartitions, "RelS", "RelR", buildRecordDescriptor,
-                    buildRecordDescriptor, new simplePartitionComputer(), new simplePartitionComputer(),
-                    new dummyPredicateEvaluator(), new dummyPredicateEvaluator(), false, dummyMissingWriters);
+            hhj = new OptimizedHybridHashJoin(context, memorySizeInFrames, numberOfPartitions, "RelS", "RelR",
+                    buildRecordDescriptor, buildRecordDescriptor, new simplePartitionComputer(),
+                    new simplePartitionComputer(), new dummyPredicateEvaluator(), new dummyPredicateEvaluator(), false,
+                    dummyMissingWriters);
             assertNotNull(hhj);
         } catch (Exception ex) {
             fail();
@@ -58,7 +89,8 @@ public class HybridHashJoinTests {
         }
     }
 
-    public void testBuildPartitionTemporaryFiles(IHybridHashJoin hhj1, IHybridHashJoin hhj2) throws HyracksDataException {
+    public void testBuildPartitionTemporaryFiles(IHybridHashJoin hhj1, IHybridHashJoin hhj2)
+            throws HyracksDataException {
         RunFileReader reader1, reader2;
         for (int i = 0; i < numberOfPartitions; i++) {
             reader1 = hhj1.getBuildRFReader(i);
@@ -162,7 +194,8 @@ public class HybridHashJoinTests {
         assertEquals(dmhhj.getProbePartitionSizeInTup(4), hhj.getProbePartitionSizeInTup(4));
         assertEquals(file1.getFile().getTotalSpace(), file2.getFile().getTotalSpace());
 
-        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic), getNumberOfTuplesInTemporaryFile(frameWriter));
+        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic),
+                getNumberOfTuplesInTemporaryFile(frameWriter));
     }
 
     @Test
@@ -187,7 +220,8 @@ public class HybridHashJoinTests {
             assertEquals(dmhhj.getMaxBuildPartitionSize(), dmhhj.getMaxBuildPartitionSize());
             assertEquals(file1.getFile().getTotalSpace(), file2.getFile().getTotalSpace());
         }
-        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic), getNumberOfTuplesInTemporaryFile(frameWriter));
+        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic),
+                getNumberOfTuplesInTemporaryFile(frameWriter));
     }
 
     @Test
@@ -202,7 +236,8 @@ public class HybridHashJoinTests {
         dmhhj.completeProbe(frameWriterDynamic);
         hhj.completeProbe(frameWriter);
         assertEquals(file1.getFile().getTotalSpace(), file2.getFile().getTotalSpace());
-        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic), getNumberOfTuplesInTemporaryFile(frameWriter));
+        assertEquals(getNumberOfTuplesInTemporaryFile(frameWriterDynamic),
+                getNumberOfTuplesInTemporaryFile(frameWriter));
     }
 
     @Test
@@ -223,7 +258,8 @@ public class HybridHashJoinTests {
 
     protected class simpleTupleComparator implements ITuplePairComparator {
         @Override
-        public int compare(IFrameTupleAccessor outerRef, int outerIndex, IFrameTupleAccessor innerRef, int innerIndex) throws HyracksDataException {
+        public int compare(IFrameTupleAccessor outerRef, int outerIndex, IFrameTupleAccessor innerRef, int innerIndex)
+                throws HyracksDataException {
             int tuple1 = tupleToInt(outerRef, outerIndex);
             int tuple2 = tupleToInt(innerRef, innerIndex);
             return tuple2 == tuple1 ? 1 : 0;
@@ -235,7 +271,8 @@ public class HybridHashJoinTests {
         tupleId += 1;
         byte[] arr = accessor.getBuffer().array();
         int t1 = accessor.getFieldEndOffset(tupleId, 0) + accessor.getTupleStartOffset(tupleId);
-        return ((arr[t1] & 0xFF) << 24) | ((arr[t1 + 1] & 0xFF) << 16) | ((arr[t1 + 2] & 0xFF) << 8) | ((arr[t1 + 3] & 0xFF) << 0);
+        return ((arr[t1] & 0xFF) << 24) | ((arr[t1 + 1] & 0xFF) << 16) | ((arr[t1 + 2] & 0xFF) << 8)
+                | ((arr[t1 + 3] & 0xFF) << 0);
     }
 
     protected class simplePartitionComputer implements ITuplePartitionComputer {

@@ -1,4 +1,29 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.hyracks.dataflow.std.join;
+
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import org.apache.hyracks.api.comm.IFrame;
 import org.apache.hyracks.api.comm.IFrameTupleAccessor;
@@ -7,15 +32,11 @@ import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionComputer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.control.nc.Joblet;
 import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.PreferToSpillFullyOccupiedFramePolicy;
 
-import java.util.*;
-import java.util.stream.Collectors;
-
 public class PartitionManager {
-    public final List<Partition> partitions = new ArrayList<>();
+    public final List<Partition> partitions = new ArrayList<Partition>();
     IFrame reloadBuffer;
     public BitSet spilledStatus;
     private IHyracksJobletContext context;
@@ -35,14 +56,10 @@ public class PartitionManager {
      */
     private final IFrameTupleAccessor tupleAccessor;
 
-    public PartitionManager(int numberOfPartitions,
-                            IHyracksJobletContext context,
-                            IPartitionedTupleBufferManager bufferManager,
-                            ITuplePartitionComputer partitionComputer,
-                            IFrameTupleAccessor frameTupleAccessor,
-                            IFrameTupleAppender frameTupleAppender,
-                            BitSet spilledStatus,
-                            String relationName) throws HyracksDataException {
+    public PartitionManager(int numberOfPartitions, IHyracksJobletContext context,
+            IPartitionedTupleBufferManager bufferManager, ITuplePartitionComputer partitionComputer,
+            IFrameTupleAccessor frameTupleAccessor, IFrameTupleAppender frameTupleAppender, BitSet spilledStatus,
+            String relationName) throws HyracksDataException {
         this.context = context;
         this.bufferManager = bufferManager;
         this.tupleAccessor = frameTupleAccessor;
@@ -50,13 +67,14 @@ public class PartitionManager {
         reloadBuffer = new VSizeFrame(context);
         this.spilledStatus = spilledStatus;
         for (int i = 0; i < numberOfPartitions; i++) {
-            partitions.add(new Partition(i, bufferManager, context, frameTupleAccessor, frameTupleAppender, reloadBuffer, relationName));
+            partitions.add(new Partition(i, bufferManager, context, frameTupleAccessor, frameTupleAppender,
+                    reloadBuffer, relationName));
         }
         if (getTotalMemory() > bufferManager.getBufferPoolSize()) {
-            throw new HyracksDataException("Number of Partitions can't be used. The memory budget in frames is smaller than the number of partitions");
+            throw new HyracksDataException(
+                    "Number of Partitions can't be used. The memory budget in frames is smaller than the number of partitions");
         }
     }
-
 
     /**
      * Get the total number of tuples in memory at the time.
@@ -93,9 +111,9 @@ public class PartitionManager {
 
     //todo: Remove this method, its unsafe Or create a Interface for Partition to hide methods that should only be accessed by PartitionManager
     public Partition getPartition(int id) {
-        for(int i =0;i<partitions.size();i++){
+        for (int i = 0; i < partitions.size(); i++) {
             Partition p = partitions.get(i);
-            if(p.getId() == id){
+            if (p.getId() == id) {
                 return p;
             }
         }
@@ -142,7 +160,8 @@ public class PartitionManager {
      * @param spillPolicy spill policy that will determine witch partition will be spilled in the case that are no buffers available.
      * @throws HyracksDataException Exception
      */
-    public void insertTupleWithSpillPolicy(int tupleId, PreferToSpillFullyOccupiedFramePolicy spillPolicy) throws HyracksDataException {
+    public void insertTupleWithSpillPolicy(int tupleId, PreferToSpillFullyOccupiedFramePolicy spillPolicy)
+            throws HyracksDataException {
         int partitionId = partitionComputer.partition(tupleAccessor, tupleId, getNumberOfPartitions());
         while (!partitions.get(partitionId).insertTuple(tupleId)) {
             spillPartition(spillPolicy.selectVictimPartition(partitionId));
@@ -168,7 +187,8 @@ public class PartitionManager {
     }
 
     public List<Partition> getSpilledOrInconsistentPartitions() {
-        return partitions.stream().filter(p -> p.getReloadedStatus() || p.getSpilledStatus()).collect(Collectors.toList());
+        return partitions.stream().filter(p -> p.getReloadedStatus() || p.getSpilledStatus())
+                .collect(Collectors.toList());
     }
 
     /**
@@ -203,7 +223,7 @@ public class PartitionManager {
      */
     public int spillAll() throws HyracksDataException {
         int framesReleased = 0;
-        for(Partition p : partitions){
+        for (Partition p : partitions) {
             framesReleased += spillPartition(p.getId());
         }
         return framesReleased;
@@ -260,8 +280,9 @@ public class PartitionManager {
         return bufferFilter(spilled, false).getId();
     }
 
-    public List<Partition> getSpillCandidatePartitions(){
-        List<Partition> candidates =  partitions.stream().filter(p -> p.getFramesUsed() > 1).collect(Collectors.toList());
+    public List<Partition> getSpillCandidatePartitions() {
+        List<Partition> candidates =
+                partitions.stream().filter(p -> p.getFramesUsed() > 1).collect(Collectors.toList());
         PartitionComparatorBuilder comparator = new PartitionComparatorBuilder();
         comparator.addStatusComparator(true);
         comparator.addBufferSizeComparator(true);
@@ -277,12 +298,12 @@ public class PartitionManager {
      * @return Number of frames Released
      * @throws HyracksDataException
      */
-    public int spillToReleaseFrames(int numberOfFrames) throws HyracksDataException{
+    public int spillToReleaseFrames(int numberOfFrames) throws HyracksDataException {
         int framesReleased = 0;
         List<Partition> candidates = getSpillCandidatePartitions();
-        for(Partition p:candidates){
+        for (Partition p : candidates) {
             framesReleased += spillPartition(p.getId());
-            if(framesReleased >= numberOfFrames){
+            if (framesReleased >= numberOfFrames) {
                 break;
             }
         }
@@ -302,7 +323,6 @@ public class PartitionManager {
         Comparator<Partition> comparator = Comparator.comparing(Partition::getTuplesProcessed).reversed();
         return Collections.max(partitions, comparator).getTuplesProcessed();
     }
-
     //endregion
 
     /**
@@ -325,7 +345,7 @@ public class PartitionManager {
      * @return <b>TRUE</b> if reload was successfull.
      * @throws HyracksDataException Exception
      */
-    public boolean reloadPartition(int id,boolean deleteAfterReload) throws HyracksDataException {
+    public boolean reloadPartition(int id, boolean deleteAfterReload) throws HyracksDataException {
         if (partitions.get(id).reload(deleteAfterReload)) {
             spilledStatus.clear(id);
             return true;
@@ -350,8 +370,8 @@ public class PartitionManager {
      * @return
      */
     public BitSet getSpilledStatus() {
-        for(Partition p : partitions){
-            spilledStatus.set(p.getId(),p.getSpilledStatus());
+        for (Partition p : partitions) {
+            spilledStatus.set(p.getId(), p.getSpilledStatus());
         }
         return spilledStatus;
     }
@@ -365,8 +385,8 @@ public class PartitionManager {
      */
     public BitSet getInconsistentStatus() {
         BitSet inconsistent = new BitSet(getNumberOfPartitions());
-        for(Partition p : partitions){
-            inconsistent.set(p.getId(),p.getSpilledStatus() || p.getReloadedStatus());
+        for (Partition p : partitions) {
+            inconsistent.set(p.getId(), p.getSpilledStatus() || p.getReloadedStatus());
         }
         return inconsistent;
     }
@@ -383,4 +403,3 @@ public class PartitionManager {
     }
 
 }
-

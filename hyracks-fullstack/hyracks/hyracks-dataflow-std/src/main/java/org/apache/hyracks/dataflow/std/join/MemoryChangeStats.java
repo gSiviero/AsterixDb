@@ -1,9 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 package org.apache.hyracks.dataflow.std.join;
-
-import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
@@ -11,6 +24,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
+
+import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
 
 public class MemoryChangeStats {
     List<MemoryStatEvent> events = new ArrayList<MemoryStatEvent>();
@@ -24,8 +40,7 @@ public class MemoryChangeStats {
     long currentFreeMemory = 0;
     int currentFramesProcessed;
 
-
-    public enum Phase{
+    public enum Phase {
         BUILD,
         PROBE
     }
@@ -43,7 +58,8 @@ public class MemoryChangeStats {
      * @param phase False -> Build
      * @param relationSizeInTuples
      */
-    public void SetOperatorInfo(Phase phase,int relationSizeInTuples[],BitSet spilledPartitions,BitSet inconsistentPartitions,String relationName,BitSet hashedPartitions){
+    public void SetOperatorInfo(Phase phase, int relationSizeInTuples[], BitSet spilledPartitions,
+            BitSet inconsistentPartitions, String relationName, BitSet hashedPartitions) {
         this.partitions = relationSizeInTuples;
         this.relationName = relationName;
         this.phase = phase;
@@ -52,6 +68,7 @@ public class MemoryChangeStats {
         this.hashedPartitions = hashedPartitions;
 
     }
+
     private class MemoryStatEvent {
         int memoryBudget = currentBudget;
         Integer memoryUpdate = null;
@@ -66,8 +83,7 @@ public class MemoryChangeStats {
         private final SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS");
         private eventType eventType;
 
-
-        public void UpdateBytesSpilled(int bytesSpilled){
+        public void UpdateBytesSpilled(int bytesSpilled) {
             this.bytesSpilled += bytesSpilled;
             this.spillEvents++;
         }
@@ -76,72 +92,72 @@ public class MemoryChangeStats {
          * Return a printable Memory Stat
          * @return
          */
-        private String printableMemStatEvent(){
-            return String.format("|%15s|%10s|%10d|%15s|%15d|%20d|%15s|\n",
-                    sdf.format(this.timeStamp) ,
-                    number2String(memoryUpdate,true),
-                    memoryBudget,
-                    number2String(spilledPartition,false),
-                    spillEvents,
-                    processedFrames,
-                    number2String(reloadedPartition,false));
+        private String printableMemStatEvent() {
+            return String.format("|%15s|%10s|%10d|%15s|%15d|%20d|%15s|\n", sdf.format(this.timeStamp),
+                    number2String(memoryUpdate, true), memoryBudget, number2String(spilledPartition, false),
+                    spillEvents, processedFrames, number2String(reloadedPartition, false));
         }
     }
-    public void AddContentionEvent(int oldBudget,int newBudget){
+
+    public void AddContentionEvent(int oldBudget, int newBudget) {
         MemoryStatEvent event = new MemoryStatEvent();
         event.memoryBudget = newBudget;
-        event.memoryUpdate = oldBudget != 0 ? newBudget - oldBudget:null;
+        event.memoryUpdate = oldBudget != 0 ? newBudget - oldBudget : null;
         this.currentBudget = newBudget;
         this.events.add(event);
     }
 
-    public void AddSpillingEvent(int pId,long currentFreeMemory){
+    public void AddSpillingEvent(int pId, long currentFreeMemory) {
         MemoryStatEvent event = new MemoryStatEvent();
         event.spilledPartition = pId;
         this.currentFreeMemory = currentFreeMemory;
         this.events.add(event);
     }
 
-    public void AddReloadEvent(int pId,long currentFreeMemory){
+    public void AddReloadEvent(int pId, long currentFreeMemory) {
         MemoryStatEvent event = new MemoryStatEvent();
         event.reloadedPartition = pId;
         this.currentFreeMemory = currentFreeMemory;
         this.events.add(event);
     }
 
-    public void UpdateProcessedFrames(int frames){
-        currentFramesProcessed =frames;
+    public void UpdateProcessedFrames(int frames) {
+        currentFramesProcessed = frames;
     }
-    public String PrintableMemBudgetStat(){
-        String ret =PrintableOperatorStats();
+
+    public String PrintableMemBudgetStat() {
+        String ret = PrintableOperatorStats();
         ret += " --------------------------------------------------------------------------------------------------------------- \n";
         ret += "|   Timestamp   | Variation|  Budget  | Spilled Part. |  Spiling Calls |  Frames Processed  |Reloaded Part. |\n";
         ret += "|---------------------------------------------------------------------------------------------------------------|\n";
-        for(MemoryStatEvent e : events){
+        for (MemoryStatEvent e : events) {
             ret += e.printableMemStatEvent();
         }
         ret += " ---------------------------------------------------------------------------------------------------------------\n";
         return ret;
     }
-    private String PrintableOperatorStats(){
-        String ret ="\n";
+
+    private String PrintableOperatorStats() {
+        String ret = "\n";
         ret += " --------------------------------------------------------------------------------------------------------------- \n";
-        ret += String.format("                                       %s - %s\n",phase == Phase.BUILD ? "BUILD" : "PROBE",relationName);
+        ret += String.format("                                       %s - %s\n",
+                phase == Phase.BUILD ? "BUILD" : "PROBE", relationName);
         ret += String.format("Partition Size in Tuples: (%d)[", Arrays.stream(partitions).sum());
-        ret+= StringUtils.join(ArrayUtils.toObject(partitions), ",");
-        ret+= "]\n";
-        ret+= "Spilled Partitions: " + spilledPartitions.toString() + "\n";
-        ret+= "Inconsistent Partitions: " + inconsistentPartitions.toString() + "\n";
-        ret+= "Hashed Partitions: " + hashedPartitions.toString() + "\n";
+        ret += StringUtils.join(ArrayUtils.toObject(partitions), ",");
+        ret += "]\n";
+        ret += "Spilled Partitions: " + spilledPartitions.toString() + "\n";
+        ret += "Inconsistent Partitions: " + inconsistentPartitions.toString() + "\n";
+        ret += "Hashed Partitions: " + hashedPartitions.toString() + "\n";
         return ret;
     }
 
-    private String number2String(Integer number,boolean withSign){
-        if(withSign)
-            return number != null ? String.format("%+d",number) : "";
+    private String number2String(Integer number, boolean withSign) {
+        if (withSign)
+            return number != null ? String.format("%+d", number) : "";
         return number != null ? number.toString() : "";
     }
-    public void clear(){
+
+    public void clear() {
         this.events.clear();
     }
 

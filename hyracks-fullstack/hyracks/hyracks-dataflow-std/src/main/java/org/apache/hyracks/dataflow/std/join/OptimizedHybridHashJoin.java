@@ -96,9 +96,9 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
     private IOperatorStats stats = null;
 
     public OptimizedHybridHashJoin(IHyracksJobletContext jobletCtx, int memSizeInFrames, int numOfPartitions,
-                                   String probeRelName, String buildRelName, RecordDescriptor probeRd, RecordDescriptor buildRd,
-                                   ITuplePartitionComputer probeHpc, ITuplePartitionComputer buildHpc, IPredicateEvaluator probePredEval,
-                                   IPredicateEvaluator buildPredEval, boolean isLeftOuter, IMissingWriterFactory[] nullWriterFactories1) {
+            String probeRelName, String buildRelName, RecordDescriptor probeRd, RecordDescriptor buildRd,
+            ITuplePartitionComputer probeHpc, ITuplePartitionComputer buildHpc, IPredicateEvaluator probePredEval,
+            IPredicateEvaluator buildPredEval, boolean isLeftOuter, IMissingWriterFactory[] nullWriterFactories1) {
         this.jobletCtx = jobletCtx;
         this.memSizeInFrames = memSizeInFrames;
         this.buildRd = buildRd;
@@ -206,7 +206,7 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
     }
 
     private RunFileWriter getSpillWriterOrCreateNewOneIfNotExist(RunFileWriter[] runFileWriters, String refName,
-                                                                 int pid) throws HyracksDataException {
+            int pid) throws HyracksDataException {
         RunFileWriter writer = runFileWriters[pid];
         if (writer == null) {
             FileReference file = jobletCtx.createManagedWorkspaceFile(refName);
@@ -357,7 +357,7 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
             // Reserve space for loaded data & increase in hash table (give back one frame taken by spilled partition.)
             currentFreeSpace = currentFreeSpace
                     - bufferManager.getPhysicalSize(pid) - SerializableHashTable
-                    .calculateByteSizeDeltaForTableSizeChange(inMemTupCount, buildPSizeInTups[pid], frameSize)
+                            .calculateByteSizeDeltaForTableSizeChange(inMemTupCount, buildPSizeInTups[pid], frameSize)
                     + frameSize;
         }
         return currentMemoryTupleCount;
@@ -555,7 +555,7 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
     }
 
     private void flushBigObjectToDisk(int pid, FrameTupleAccessor accessor, int i, RunFileWriter[] runFileWriters,
-                                      String refName) throws HyracksDataException {
+            String refName) throws HyracksDataException {
         if (bigFrameAppender == null) {
             bigFrameAppender = new FrameTupleAppender(new VSizeFrame(jobletCtx));
         }

@@ -1,6 +1,27 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.apache.hyracks.dataflow.std.join;
 
-import org.apache.hyracks.api.comm.*;
+import org.apache.hyracks.api.comm.IFrame;
+import org.apache.hyracks.api.comm.IFrameTupleAccessor;
+import org.apache.hyracks.api.comm.IFrameTupleAppender;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
@@ -8,7 +29,7 @@ import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.util.CleanupUtils;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
-import org.apache.hyracks.dataflow.std.buffermanager.*;
+import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
 import org.apache.hyracks.dataflow.std.structures.TuplePointer;
 
 /**
@@ -64,15 +85,22 @@ public class Partition {
      * Number of Bytes Spilled to Disk
      */
     private int bytesSpilled = 0;
+
     /**Return number of Bytes Spilled to Disk**/
-    public int getBytesSpilled(){return bytesSpilled;}
+    public int getBytesSpilled() {
+        return bytesSpilled;
+    }
 
     /**
      * Number of Bytes Reloaded from Disk
      */
     private int bytesReloaded = 0;
+
     /** Return number of Bytes Reloaded from Disk**/
-    public int getBytesReloaded(){return bytesReloaded;}
+    public int getBytesReloaded() {
+        return bytesReloaded;
+    }
+
     private String relationName;
 
     /**
@@ -91,12 +119,14 @@ public class Partition {
     public boolean getSpilledStatus() {
         return spilled;
     }
+
     /**
      * Reloaded Status<br>
      * <b>TRUE</b> if Partition was reloaded at some point.<br>
      * <b>FALSE</b> if Partition was never reloaded.
      */
     private boolean reloaded = false;
+
     public boolean getReloadedStatus() {
         return reloaded;
     }
@@ -119,14 +149,14 @@ public class Partition {
         return Math.max(bufferManager.getPhysicalSize(id), context.getInitialFrameSize());
     }
 
-
     /**
      * Get number of <b>BYTES</b> used by Partition.
      *
      * @return Number of <b>BYTES</b>
      */
     public int getFramesUsed() {
-        return Math.max(bufferManager.getPhysicalSize(id), context.getInitialFrameSize()) / context.getInitialFrameSize();
+        return Math.max(bufferManager.getPhysicalSize(id), context.getInitialFrameSize())
+                / context.getInitialFrameSize();
     }
 
     /**
@@ -173,12 +203,9 @@ public class Partition {
     //endregion
 
     //region [CONSTRUCTORS]
-    public Partition(int id, IPartitionedTupleBufferManager bufferManager,
-                     IHyracksJobletContext context,
-                     IFrameTupleAccessor frameTupleAccessor,
-                     IFrameTupleAppender tupleAppender,
-                     IFrame reloadBuffer,
-                     String relationName) {
+    public Partition(int id, IPartitionedTupleBufferManager bufferManager, IHyracksJobletContext context,
+            IFrameTupleAccessor frameTupleAccessor, IFrameTupleAppender tupleAppender, IFrame reloadBuffer,
+            String relationName) {
         this.id = id;
         this.bufferManager = bufferManager;
         this.frameTupleAccessor = frameTupleAccessor;
@@ -236,7 +263,7 @@ public class Partition {
      * @throws HyracksDataException Exception
      */
     public void spill() throws HyracksDataException {
-        if(tuplesInMemory == 0){
+        if (tuplesInMemory == 0) {
             return;
         }
         try {
@@ -259,7 +286,7 @@ public class Partition {
      * @throws HyracksDataException Exception
      */
     public void close() throws HyracksDataException {
-        if(tuplesInMemory > 0)
+        if (tuplesInMemory > 0)
             spill();
     }
 
@@ -290,14 +317,14 @@ public class Partition {
         } catch (Exception ex) {
             throw new HyracksDataException(ex.getMessage());
         } finally {
-            if(deleteAfterReload){
+            if (deleteAfterReload) {
                 rfReader.close();
             }
         }
         spilled = false;
         this.tuplesInMemory += this.tuplesSpilled;
         this.tuplesSpilled = 0;
-        if(deleteAfterReload){
+        if (deleteAfterReload) {
             rfWriter = null;
         }
         reloaded = true;
@@ -337,7 +364,7 @@ public class Partition {
      */
     private void createFileWriterIfNotExist() throws HyracksDataException {
         if (rfWriter == null) {
-            String fileName = String.format("$%s-Partition_%d-",relationName,id);
+            String fileName = String.format("$%s-Partition_%d-", relationName, id);
             FileReference file = context.createManagedWorkspaceFile(fileName);
             rfWriter = new RunFileWriter(file, context.getIoManager());
             rfWriter.open();
@@ -350,11 +377,10 @@ public class Partition {
      * @throws HyracksDataException
      */
     private void createFileReaderIfNotExist() throws HyracksDataException {
-        if(rfWriter != null && rfReader == null){
+        if (rfWriter != null && rfReader == null) {
             rfReader = rfReader != null ? rfReader : rfWriter.createDeleteOnCloseReader();
             rfReader.open();
         }
     }
     //endregion
 }
-

@@ -28,6 +28,7 @@ import org.apache.hyracks.dataflow.std.structures.TuplePointer;
 public interface IPartitionedTupleBufferManager {
 
     int getBufferPoolSize();
+
     int getNumPartitions();
 
     int getNumTuples(int partition);

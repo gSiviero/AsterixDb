@@ -19,7 +19,6 @@
 package org.apache.hyracks.dataflow.std.join;
 
 import java.util.BitSet;
-import java.util.List;
 
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
@@ -34,13 +33,15 @@ public class HybridHashJoinUtil {
     int averageMemoryBudget;
     RunFileWriter[] rfWriters;
     IPartitionedTupleBufferManager bufferManager;
-    public HybridHashJoinUtil(BitSet spilledStatus,RunFileWriter[] rfWriters,IPartitionedTupleBufferManager bufferManager) {
+
+    public HybridHashJoinUtil(BitSet spilledStatus, RunFileWriter[] rfWriters,
+            IPartitionedTupleBufferManager bufferManager) {
         this.spilledStatus = spilledStatus;
         this.rfWriters = rfWriters;
         this.bufferManager = bufferManager;
     }
 
-    public void setDynamicMemoryStats(int memoryContention,int memoryExpansion){
+    public void setDynamicMemoryStats(int memoryContention, int memoryExpansion) {
 
         this.memoryExpansion = memoryExpansion;
         this.memoryContention = memoryContention;
@@ -120,8 +121,7 @@ public class HybridHashJoinUtil {
         return buf.toString();
     }
 
-    public String printPartitionInfo(){
+    public String printPartitionInfo() {
         return " Teste ";
     }
 }
-

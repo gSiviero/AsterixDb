@@ -18,25 +18,34 @@
  */
 package org.apache.hyracks.dataflow.std.join;
 
-import org.apache.http.HttpException;
+import java.nio.ByteBuffer;
+import java.util.BitSet;
+import java.util.List;
+
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
-import org.apache.hyracks.api.dataflow.value.*;
+import org.apache.hyracks.api.dataflow.value.IMissingWriter;
+import org.apache.hyracks.api.dataflow.value.IMissingWriterFactory;
+import org.apache.hyracks.api.dataflow.value.IPredicateEvaluator;
+import org.apache.hyracks.api.dataflow.value.ITuplePairComparator;
+import org.apache.hyracks.api.dataflow.value.ITuplePartitionComputer;
+import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.job.profiling.IOperatorStats;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
-import org.apache.hyracks.dataflow.std.buffermanager.*;
+import org.apache.hyracks.dataflow.std.buffermanager.DeallocatableFramePool;
+import org.apache.hyracks.dataflow.std.buffermanager.FramePoolBackedFrameBufferManager;
+import org.apache.hyracks.dataflow.std.buffermanager.IDeallocatableFramePool;
+import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
+import org.apache.hyracks.dataflow.std.buffermanager.ISimpleFrameBufferManager;
+import org.apache.hyracks.dataflow.std.buffermanager.PreferToSpillFullyOccupiedFramePolicy;
+import org.apache.hyracks.dataflow.std.buffermanager.VPartitionTupleBufferManager;
 import org.apache.hyracks.dataflow.std.structures.ISerializableTable;
 import org.apache.hyracks.dataflow.std.structures.SerializableHashTable;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.nio.ByteBuffer;
-import java.util.BitSet;
-import java.util.List;
-import java.util.Random;
 
 /**
  * This class mainly applies one level of HHJ on a pair of
@@ -82,9 +91,9 @@ public class HybridHashJoin implements IHybridHashJoin {
     protected boolean deleteAfterReload = true;
 
     public HybridHashJoin(IHyracksJobletContext jobletCtx, int memSizeInFrames, int numOfPartitions,
-                          String probeRelName, String buildRelName, RecordDescriptor probeRd, RecordDescriptor buildRd,
-                          ITuplePartitionComputer probeHpc, ITuplePartitionComputer buildHpc, IPredicateEvaluator probePredEval,
-                          IPredicateEvaluator buildPredEval, boolean isLeftOuter, IMissingWriterFactory[] nullWriterFactories1) {
+            String probeRelName, String buildRelName, RecordDescriptor probeRd, RecordDescriptor buildRd,
+            ITuplePartitionComputer probeHpc, ITuplePartitionComputer buildHpc, IPredicateEvaluator probePredEval,
+            IPredicateEvaluator buildPredEval, boolean isLeftOuter, IMissingWriterFactory[] nullWriterFactories1) {
         this.jobletCtx = jobletCtx;
         this.memSizeInFrames = memSizeInFrames;
         this.buildRd = buildRd;
@@ -115,7 +124,7 @@ public class HybridHashJoin implements IHybridHashJoin {
 
     @Override
     public void initBuild() throws HyracksDataException {
-       framePool =
+        framePool =
                 new DeallocatableFramePool(jobletCtx, memSizeInFrames * jobletCtx.getInitialFrameSize(), dynamicMemory);
         bufferManagerForHashTable = new FramePoolBackedFrameBufferManager(framePool);
         bufferManager = new VPartitionTupleBufferManager(
@@ -123,7 +132,8 @@ public class HybridHashJoin implements IHybridHashJoin {
                 numOfPartitions, framePool);
 
         spillPolicy = new PreferToSpillFullyOccupiedFramePolicy(bufferManager, spilledStatus);
-        buildPartitionManager = new PartitionManager(numOfPartitions, jobletCtx, bufferManager, buildHpc, accessorBuild, bigFrameAppender, spilledStatus, buildRelName);
+        buildPartitionManager = new PartitionManager(numOfPartitions, jobletCtx, bufferManager, buildHpc, accessorBuild,
+                bigFrameAppender, spilledStatus, buildRelName);
     }
 
     @Override
@@ -145,13 +155,15 @@ public class HybridHashJoin implements IHybridHashJoin {
         // during this step in order to make the space.)
         // and tries to bring back as many spilled partitions as possible if there is free space.
         spillAndReloadPartitions();
-        table = new SerializableHashTable(buildPartitionManager.getTuplesInMemory(), jobletCtx, bufferManagerForHashTable);
+        table = new SerializableHashTable(buildPartitionManager.getTuplesInMemory(), jobletCtx,
+                bufferManagerForHashTable);
         this.inMemJoiner = new InMemoryHashJoin(jobletCtx, new FrameTupleAccessor(probeRd), probeHpc,
                 new FrameTupleAccessor(buildRd), buildRd, buildHpc, isLeftOuter, nonMatchWriters, table, isReversed,
                 bufferManagerForHashTable);
         buildHashTable();
         if (stats != null) {
-            LOGGER.info(String.format("Bytes Written:%d | Bytes Read: %d", buildPartitionManager.getBytesSpilled(), buildPartitionManager.getBytesReloaded()));
+            LOGGER.info(String.format("Bytes Written:%d | Bytes Read: %d", buildPartitionManager.getBytesSpilled(),
+                    buildPartitionManager.getBytesReloaded()));
         }
     }
 
@@ -178,14 +190,14 @@ public class HybridHashJoin implements IHybridHashJoin {
      * @return
      */
     private long calculateFreeSpace() {
-        return  framePool.getMemoryBudget();
+        return framePool.getMemoryBudget();
     }
 
     private long calculateSpaceAfterSpillBuildPartition(Partition p) {
         int frameSize = jobletCtx.getInitialFrameSize();
         long spaceAfterSpill = calculateFreeSpace() + p.getMemoryUsed();
-        spaceAfterSpill -= SerializableHashTable
-                .calculateByteSizeDeltaForTableSizeChange(buildPartitionManager.getTuplesInMemory(), -p.getTuplesInMemory(), frameSize);
+        spaceAfterSpill -= SerializableHashTable.calculateByteSizeDeltaForTableSizeChange(
+                buildPartitionManager.getTuplesInMemory(), -p.getTuplesInMemory(), frameSize);
         return spaceAfterSpill;
     }
 
@@ -253,11 +265,11 @@ public class HybridHashJoin implements IHybridHashJoin {
         if (calculateFreeSpace() > 0) {
             for (Partition p : buildPartitionManager.getSpilledPartitions()) {
                 // Expected hash table size increase after reloading this partition
-                long expectedHashTableByteSizeIncrease = SerializableHashTable
-                        .calculateByteSizeDeltaForTableSizeChange(buildPartitionManager.getTuplesInMemory(), p.getTuplesProcessed(), frameSize);
+                long expectedHashTableByteSizeIncrease = SerializableHashTable.calculateByteSizeDeltaForTableSizeChange(
+                        buildPartitionManager.getTuplesInMemory(), p.getTuplesProcessed(), frameSize);
                 if (calculateFreeSpace() >= p.getFileSize() + expectedHashTableByteSizeIncrease) {
                     LOGGER.info(String.format("Reloading Partition %d", p.getId()));
-                    buildPartitionManager.reloadPartition(p.getId(),this.deleteAfterReload);
+                    buildPartitionManager.reloadPartition(p.getId(), this.deleteAfterReload);
                     buildHashTable();
                     reloaded = true;
                 }
@@ -267,24 +279,24 @@ public class HybridHashJoin implements IHybridHashJoin {
     }
 
     protected void buildHashTable() throws HyracksDataException {
-        try{
+        try {
             //@todo Check if it is not releasing the memory from other Buffer Pools. Does it makes the frames empty or deallocate them?
             //Does it deallocate and give it back to the framePool?
             //Wisconsin Data Generator (play with the size of tuples)
-        inMemJoiner.releaseMemory();
-        table = new SerializableHashTable(buildPartitionManager.getTuplesInMemory(), jobletCtx, bufferManagerForHashTable);
-        inMemJoiner.setTable(table);
-        List<Partition> resident = buildPartitionManager.getMemoryResidentPartitions();
-        for (Partition p : resident) {
-            buildHashTableForPartition(p.getId());
-        }
-        }
-        catch (Exception ex){
+            inMemJoiner.releaseMemory();
+            table = new SerializableHashTable(buildPartitionManager.getTuplesInMemory(), jobletCtx,
+                    bufferManagerForHashTable);
+            inMemJoiner.setTable(table);
+            List<Partition> resident = buildPartitionManager.getMemoryResidentPartitions();
+            for (Partition p : resident) {
+                buildHashTableForPartition(p.getId());
+            }
+        } catch (Exception ex) {
             LOGGER.info("Error Building Hash Table");
         }
     }
 
-    protected void buildHashTableForPartition(int pid) throws HyracksDataException{
+    protected void buildHashTableForPartition(int pid) throws HyracksDataException {
         bufferManager.flushPartition(pid, new IFrameWriter() {
             @Override
             public void open() {
@@ -309,7 +321,8 @@ public class HybridHashJoin implements IHybridHashJoin {
     }
 
     @Override
-    public void initProbe(ITuplePairComparator comparator) throws HyracksDataException {        bufferManagerForHashTable = new FramePoolBackedFrameBufferManager(framePool);
+    public void initProbe(ITuplePairComparator comparator) throws HyracksDataException {
+        bufferManagerForHashTable = new FramePoolBackedFrameBufferManager(framePool);
         bufferManagerProbe = new VPartitionTupleBufferManager(
                 PreferToSpillFullyOccupiedFramePolicy.createAtMostOneFrameForSpilledPartitionConstrain(spilledStatus),
                 numOfPartitions, framePool);
@@ -358,7 +371,8 @@ public class HybridHashJoin implements IHybridHashJoin {
 
     private void processTupleProbePhase(int tupleId, int pid) throws HyracksDataException {
         if (!probePartitionManager.insertTuple(tupleId)) {
-            int recordSize = VPartitionTupleBufferManager.calculateActualSize(null, accessorProbe.getTupleLength(tupleId));
+            int recordSize =
+                    VPartitionTupleBufferManager.calculateActualSize(null, accessorProbe.getTupleLength(tupleId));
             // If the partition is at least half-full and insertion fails, that partition is preferred to get
             // spilled, otherwise the biggest partition gets chosen as the victim.
             boolean modestCase = recordSize <= (jobletCtx.getInitialFrameSize() / 2);
@@ -386,14 +400,15 @@ public class HybridHashJoin implements IHybridHashJoin {
         //We do NOT join the spilled partitions here, that decision is made at the descriptor level
         //(which join technique to use)
         for (Partition p : buildPartitionManager.getSpilledOrInconsistentPartitions()) {
-            if(probePartitionManager.getTuplesInMemory(p.getId())>0) {
+            if (probePartitionManager.getTuplesInMemory(p.getId()) > 0) {
                 buildPartitionManager.spillPartition(p.getId());
                 probePartitionManager.spillPartition(p.getId());
             }
         }
         inMemJoiner.completeJoin(writer);
         if (stats != null) {
-            LOGGER.info(String.format("Bytes Written:%d | Bytes Read: %d", buildPartitionManager.getBytesSpilled(), buildPartitionManager.getBytesReloaded()));
+            LOGGER.info(String.format("Bytes Written:%d | Bytes Read: %d", buildPartitionManager.getBytesSpilled(),
+                    buildPartitionManager.getBytesReloaded()));
         }
     }
 
@@ -481,4 +496,3 @@ public class HybridHashJoin implements IHybridHashJoin {
     }
 
 }
-
