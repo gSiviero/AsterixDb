@@ -268,6 +268,9 @@ public class HybridHashJoin implements IHybridHashJoin {
 
     protected void buildHashTable() throws HyracksDataException {
         try{
+            //@todo Check if it is not releasing the memory from other Buffer Pools. Does it makes the frames empty or deallocate them?
+            //Does it deallocate and give it back to the framePool?
+            //Wisconsin Data Generator (play with the size of tuples)
         inMemJoiner.releaseMemory();
         table = new SerializableHashTable(buildPartitionManager.getTuplesInMemory(), jobletCtx, bufferManagerForHashTable);
         inMemJoiner.setTable(table);
