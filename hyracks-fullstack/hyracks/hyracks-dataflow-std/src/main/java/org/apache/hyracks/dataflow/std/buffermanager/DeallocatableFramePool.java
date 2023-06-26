@@ -31,7 +31,13 @@ import org.apache.logging.log4j.Logger;
 public class DeallocatableFramePool implements IDeallocatableFramePool {
     private static final Logger LOGGER = LogManager.getLogger();
     private final IHyracksFrameMgrContext ctx;
+    /**
+     * Total size of Memory Budget in <b>FRAMES</b>
+     */
     private int memBudget;
+    /**
+     * Total number of already allocated <b>FRAMES</b>
+     */
     private int allocated;
     private LinkedList<ByteBuffer> buffers;
 

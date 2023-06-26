@@ -36,7 +36,7 @@ import org.apache.hyracks.dataflow.std.structures.TuplePointer;
  * This Class describes a Partition of a Hybrid Hash Join Operator.<br>
  * It works as a unique source of truth for its status.
  */
-public class Partition {
+public class Partition implements IPartition {
 
     //region [PROPERTIES]
     /**
@@ -49,6 +49,7 @@ public class Partition {
      *
      * @return Partition id
      */
+    @Override
     public int getId() {
         return id;
     }
@@ -63,6 +64,7 @@ public class Partition {
      *
      * @return Number of Tuples in Memory
      */
+    @Override
     public int getTuplesInMemory() {
         return tuplesInMemory;
     }
@@ -77,6 +79,7 @@ public class Partition {
      *
      * @return Number of Tuples spilled to disk
      */
+    @Override
     public int getTuplesSpilled() {
         return tuplesSpilled;
     }
@@ -86,7 +89,10 @@ public class Partition {
      */
     private int bytesSpilled = 0;
 
-    /**Return number of Bytes Spilled to Disk**/
+    /**
+     * Return number of Bytes Spilled to Disk
+     **/
+    @Override
     public int getBytesSpilled() {
         return bytesSpilled;
     }
@@ -96,7 +102,10 @@ public class Partition {
      */
     private int bytesReloaded = 0;
 
-    /** Return number of Bytes Reloaded from Disk**/
+    /**
+     * Return number of Bytes Reloaded from Disk
+     **/
+    @Override
     public int getBytesReloaded() {
         return bytesReloaded;
     }
@@ -116,6 +125,7 @@ public class Partition {
      * @return <b>TRUE</b> if Partition is spilled.<br>
      * <b>FALSE</b> if Partition is memory resident.
      */
+    @Override
     public boolean getSpilledStatus() {
         return spilled;
     }
@@ -127,6 +137,12 @@ public class Partition {
      */
     private boolean reloaded = false;
 
+    /**
+     * Bets reloaded Status.
+     *
+     * @return <b>TURE</b> if this partition was reloaded at least once.
+     */
+    @Override
     public boolean getReloadedStatus() {
         return reloaded;
     }
@@ -136,6 +152,7 @@ public class Partition {
      *
      * @return Total number of processed tuples
      */
+    @Override
     public int getTuplesProcessed() {
         return tuplesInMemory + tuplesSpilled;
     }
@@ -145,8 +162,9 @@ public class Partition {
      *
      * @return Number of <b>BYTES</b>
      */
+    @Override
     public int getMemoryUsed() {
-        return Math.max(bufferManager.getPhysicalSize(id), context.getInitialFrameSize());
+        return bufferManager.getPhysicalSize(id);
     }
 
     /**
@@ -154,9 +172,9 @@ public class Partition {
      *
      * @return Number of <b>BYTES</b>
      */
+    @Override
     public int getFramesUsed() {
-        return Math.max(bufferManager.getPhysicalSize(id), context.getInitialFrameSize())
-                / context.getInitialFrameSize();
+        return getMemoryUsed() / context.getInitialFrameSize();
     }
 
     /**
@@ -164,9 +182,9 @@ public class Partition {
      *
      * @return File Reader
      */
-    public RunFileReader getRfReader() throws HyracksDataException {
+    public RunFileReader getFileReader() throws HyracksDataException {
         createFileReaderIfNotExist();
-        return rfReader;
+        return  rfReader;
     }
 
     /**
@@ -200,19 +218,34 @@ public class Partition {
      */
     private final IHyracksJobletContext context;
     boolean closed = false;
+    int frameLimit= Integer.MAX_VALUE;
     //endregion
 
     //region [CONSTRUCTORS]
+
+    /**
+     * Defailt Constructor
+     *
+     * @param id                 Id of Partition, assigned by the Partition Manger
+     * @param bufferManager      Buffer manager shared between other objects
+     * @param context            Database context
+     * @param frameTupleAccessor Frame Tupple acessor
+     * @param tupleAppender      Tupple appender for Large tupples
+     * @param reloadBuffer       Buffer used to reload Partition from disk
+     * @param relationName       Relation's Name
+     */
     public Partition(int id, IPartitionedTupleBufferManager bufferManager, IHyracksJobletContext context,
-            IFrameTupleAccessor frameTupleAccessor, IFrameTupleAppender tupleAppender, IFrame reloadBuffer,
-            String relationName) {
+                     IFrameTupleAccessor frameTupleAccessor, IFrameTupleAppender tupleAppender, IFrame reloadBuffer,
+                     String relationName,int frameLimit) throws HyracksDataException{
         this.id = id;
         this.bufferManager = bufferManager;
         this.frameTupleAccessor = frameTupleAccessor;
+//        bufferManager.reserveBufer();
         this.tupleAppender = tupleAppender;
         this.reloadBuffer = reloadBuffer;
         this.context = context;
         this.relationName = relationName;
+        this.frameLimit = frameLimit;
     }
 
     //endregion
@@ -231,10 +264,10 @@ public class Partition {
         int framesNeededForTuple = bufferManager.framesNeeded(frameTupleAccessor.getTupleLength(tupleId), 0);
         if (framesNeededForTuple * context.getInitialFrameSize() > bufferManager.getBufferPoolSize()) {
             throw HyracksDataException.create(ErrorCode.INSUFFICIENT_MEMORY);
-        } else if (framesNeededForTuple > bufferManager.getConstrain().frameLimit(id)) {
+        } else if (framesNeededForTuple > this.frameLimit) {
             insertLargeTuple(tupleId);
             return true;
-        } else if (bufferManager.insertTuple(id, frameTupleAccessor, tupleId, tuplePointer)) {
+        } else if (bufferManager.insertTuple(this.id, frameTupleAccessor, tupleId, tuplePointer)) {
             tuplesInMemory++;
             return true;
         }
@@ -288,6 +321,7 @@ public class Partition {
     public void close() throws HyracksDataException {
         if (tuplesInMemory > 0)
             spill();
+        closed = true;
     }
 
     /**
@@ -304,7 +338,7 @@ public class Partition {
             while (rfReader.nextFrame(reloadBuffer)) {
                 frameTupleAccessor.reset(reloadBuffer.getBuffer());
                 for (int tid = 0; tid < frameTupleAccessor.getTupleCount(); tid++) {
-                    if (!bufferManager.insertTuple(id, frameTupleAccessor, tid, tuplePointer)) {
+                    if (!bufferManager.insertTuple(this.id, frameTupleAccessor, tid, tuplePointer)) {
                         // for some reason (e.g. fragmentation) if inserting fails, we need to clear the occupied frames
                         bufferManager.clearPartition(this.id);
                         return false;
@@ -312,21 +346,20 @@ public class Partition {
                 }
             }
             bytesReloaded += rfReader.getFileSize();
-            // Closes and deletes the run file if it is already loaded into memory.
-            rfReader.setDeleteAfterClose(true);
         } catch (Exception ex) {
             throw new HyracksDataException(ex.getMessage());
         } finally {
             if (deleteAfterReload) {
                 rfReader.close();
+                rfWriter.close();
+                rfWriter = null;
+                rfReader = null;
             }
         }
+        closed = false;
         spilled = false;
         this.tuplesInMemory += this.tuplesSpilled;
         this.tuplesSpilled = 0;
-        if (deleteAfterReload) {
-            rfWriter = null;
-        }
         reloaded = true;
         return true;
     }
@@ -350,11 +383,14 @@ public class Partition {
     public void cleanUp() throws HyracksDataException {
         tuplesSpilled = 0;
         tuplesInMemory = 0;
+        closed = false;
+        spilled = false;
         bufferManager.clearPartition(id);
         if (rfWriter != null) {
             CleanupUtils.fail(rfWriter, null);
         }
         rfReader = null;
+        rfWriter = null;
     }
 
     /**
@@ -379,6 +415,7 @@ public class Partition {
     private void createFileReaderIfNotExist() throws HyracksDataException {
         if (rfWriter != null && rfReader == null) {
             rfReader = rfReader != null ? rfReader : rfWriter.createDeleteOnCloseReader();
+            rfReader.setDeleteAfterClose(true);
             rfReader.open();
         }
     }

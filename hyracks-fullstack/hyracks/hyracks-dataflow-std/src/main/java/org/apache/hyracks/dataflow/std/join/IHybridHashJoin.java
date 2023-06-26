@@ -40,6 +40,11 @@ public interface IHybridHashJoin {
 
     void fail() throws HyracksDataException;
 
+    /**
+     * Initiate Probe Phase
+     * @param comparator Comparator that determines if tuples match.
+     * @throws HyracksDataException
+     */
     void initProbe(ITuplePairComparator comparator) throws HyracksDataException;
 
     void probe(ByteBuffer buffer, IFrameWriter writer) throws HyracksDataException;
@@ -70,7 +75,10 @@ public interface IHybridHashJoin {
 
     void setOperatorStats(IOperatorStats stats);
 
-    int updateMemoryBudget(int newBudget) throws HyracksDataException;
+    int updateMemoryBudgetBuild(int newBudget) throws HyracksDataException;
 
     int updateMemoryBudgetProbe(int newBudget) throws HyracksDataException;
+
+    long getBuildFramesInMemory();
+
 }

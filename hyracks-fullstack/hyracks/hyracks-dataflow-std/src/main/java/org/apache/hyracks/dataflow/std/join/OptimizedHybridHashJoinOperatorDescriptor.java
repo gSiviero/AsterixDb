@@ -144,7 +144,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
     private boolean skipInMemoryHJ = false;
     private boolean forceNLJ = false;
     private boolean forceRoleReversal = false;
-    Random r = new Random();
+    Random r = new Random(2);
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -317,9 +317,9 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-                    if (framesProcessed % 5 == 0) {
+                    if (framesProcessed % 15 == 0) {
                         int result = r.nextInt(30) + memSizeInFrames;
-                        state.hybridHJ.updateMemoryBudget(result);
+                        state.hybridHJ.updateMemoryBudgetBuild(result);
                     }
                     state.hybridHJ.build(buffer);
                     framesProcessed++;

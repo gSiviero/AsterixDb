@@ -144,6 +144,5 @@ public interface IPartitionedTupleBufferManager {
      * @return Returns True if Update was successfull, returns False if it was not possible to update the memory Budget.
      */
     boolean updateMemoryBudget(int desiredSize);
-
-    void allocateEmptyFrame(int partitionId) throws HyracksDataException;
+    void reserveBufer() throws HyracksDataException;
 }

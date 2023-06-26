@@ -326,9 +326,7 @@ public class VPartitionTupleBufferManager implements IPartitionedTupleBufferMana
         return framePool.updateMemoryBudget(desiredSize);
     }
 
-    @Override
-    public void allocateEmptyFrame(int partitionId) throws HyracksDataException {
-        getLastBufferOrCreateNewIfNotExist(partitionId, 0, 0);
+    public void reserveBufer() throws HyracksDataException{
+        ByteBuffer buffer =framePool.allocateFrame(framePool.getMinFrameSize());
     }
-
 }

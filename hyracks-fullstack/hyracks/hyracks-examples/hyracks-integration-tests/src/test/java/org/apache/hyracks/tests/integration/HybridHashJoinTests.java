@@ -100,7 +100,6 @@ public class HybridHashJoinTests {
             assertEquals(tuples1, tuples2);
         }
     }
-
     @Test
     public void initBuildTest() throws HyracksDataException {
         contructorTest();
@@ -303,9 +302,25 @@ public class HybridHashJoinTests {
         ArrayTupleReference tuple = new ArrayTupleReference();
         FrameTupleAppender appender = new FrameTupleAppender();
         appender.reset(buffer, true);
+        int i = 0;
         while (appender.append(tb.getFieldEndOffsets(), tb.getByteArray(), 0, tb.getSize())) {
-            int nextInt = rnd.nextInt(10000);
-            TupleUtils.createIntegerTuple(tb, tuple, nextInt);
+            TupleUtils.createIntegerTuple(tb, tuple, i++);
+            tuple.reset(tb.getFieldEndOffsets(), tb.getByteArray());
+        }
+        return buffer;
+    }
+
+    protected IFrame generateIntFrameToPartition(int id) throws HyracksDataException {
+        VSizeFrame buffer = new VSizeFrame(context);
+        int fieldCount = 1;
+        ArrayTupleBuilder tb = new ArrayTupleBuilder(fieldCount);
+        ArrayTupleReference tuple = new ArrayTupleReference();
+        FrameTupleAppender appender = new FrameTupleAppender();
+        appender.reset(buffer, true);
+        int i = 0;
+        while (appender.append(tb.getFieldEndOffsets(), tb.getByteArray(), 0, tb.getSize())) {
+            int n = (i++) * numberOfPartitions + id;
+            TupleUtils.createIntegerTuple(tb, tuple, n);
             tuple.reset(tb.getFieldEndOffsets(), tb.getByteArray());
         }
         return buffer;

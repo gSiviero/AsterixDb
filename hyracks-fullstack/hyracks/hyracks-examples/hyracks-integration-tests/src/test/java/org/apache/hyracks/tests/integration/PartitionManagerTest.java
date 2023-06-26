@@ -19,9 +19,6 @@
  */
 package org.apache.hyracks.tests.integration;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-
 import java.util.BitSet;
 import java.util.List;
 import java.util.Random;
@@ -50,9 +47,12 @@ import org.apache.hyracks.dataflow.std.join.Partition;
 import org.apache.hyracks.dataflow.std.join.PartitionComparatorBuilder;
 import org.apache.hyracks.dataflow.std.join.PartitionManager;
 import org.apache.hyracks.test.support.TestUtils;
+import org.junit.Assert;
 import org.junit.Test;
 
-class PartitionManagerTest {
+import static org.junit.Assert.*;
+
+public class PartitionManagerTest {
     int numberOfPartitions = 5;
     int frameSize = 32768;
     int totalNumberOfFrames = 10;
@@ -62,11 +62,12 @@ class PartitionManagerTest {
     PartitionManager partitionManager;
     BitSet status;
     IFrameTupleAccessor tupleAccessor;
+    IPartitionedTupleBufferManager bufferManager;
     private final Random rnd = new Random(50);
 
     public PartitionManagerTest() throws HyracksDataException {
         IDeallocatableFramePool framePool = new DeallocatableFramePool(context, totalNumberOfFrames * frameSize, false);
-        IPartitionedTupleBufferManager bufferManager =
+        bufferManager =
                 new VPartitionTupleBufferManager(null, numberOfPartitions, framePool);
         status = new BitSet(numberOfPartitions);
         bufferManager.setConstrain(
@@ -84,7 +85,7 @@ class PartitionManagerTest {
         int largeNumberOfPartitions = 10;
         int smallFramePoolSize = 5;
         IDeallocatableFramePool framePool = new DeallocatableFramePool(context, smallFramePoolSize * frameSize, false);
-        IPartitionedTupleBufferManager bufferManager =
+        bufferManager =
                 new VPartitionTupleBufferManager(null, largeNumberOfPartitions, framePool);
         status = new BitSet(largeNumberOfPartitions);
         bufferManager.setConstrain(
@@ -106,84 +107,105 @@ class PartitionManagerTest {
     public void ConstructorTest() {
         assertEquals(partitionManager.getTuplesInMemory(), 0);
         assertEquals(partitionManager.getNumberOfPartitions(), 5);
-        assertEquals(partitionManager.getTotalMemory(), numberOfPartitions * frameSize);
+        assertEquals(partitionManager.getTotalMemory(), numberOfPartitions * frameSize,0);
     }
 
     @Test
     public void InsertTuplesIntoPartitionTest() throws HyracksDataException {
+        assertEquals(partitionManager.getTotalFrames(), 5);
+        assertEquals(partitionManager.getPartition(0).getFramesUsed(),1);
+        for(int i=0;i<5;i++) {
+            tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
+            for(int j = 0; j<tupleAccessor.getTupleCount();j++){
+                if(!partitionManager.insertTuple(j)){
+                    break;
+                }
+            }
+        }
+        assertEquals(partitionManager.getPartition(0).getFramesUsed(),5);
+        assertEquals(partitionManager.getPartition(1).getFramesUsed(),1);
+        assertEquals(partitionManager.getPartition(2).getFramesUsed(),1);
+        assertEquals(partitionManager.getPartition(3).getFramesUsed(),1);
+        assertEquals(partitionManager.getPartition(4).getFramesUsed(),1);
+        assertEquals(partitionManager.getTotalFrames(),9);
+        tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
         partitionManager.insertTuple(0);
-        assertEquals(partitionManager.getTuplesInMemory(), 1);
-        partitionManager.insertTuple(1);
-        assertEquals(partitionManager.getTuplesProcessed(), 2);
-        assertEquals(partitionManager.getTuplesInMemory(), 2);
-        assertEquals(partitionManager.getSpilledStatus().cardinality(), 0);
-        assertEquals(partitionManager.getBytesReloaded(), 0);
-        assertEquals(partitionManager.getBytesSpilled(), 0);
+        assertEquals(partitionManager.getPartition(0).getFramesUsed(),6);
     }
 
     @Test
-    void SpillPartition() throws HyracksDataException {
-        InsertTuplesIntoPartitionTest();
-        assertEquals(partitionManager.spillPartition(0), 0);
-        assertEquals(partitionManager.getTuplesProcessed(), 2);
-        assertEquals(partitionManager.getTuplesSpilled(), 1);
-        assertEquals(partitionManager.getTuplesInMemory(), 1);
+    public void SpillPartition() throws HyracksDataException {
+        int numberOfTuples = 0;
+        for(int i=0;i<5;i++) {
+            tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
+            for(int j = 0; j<tupleAccessor.getTupleCount();j++){
+                if(!partitionManager.insertTuple(j)){
+                    break;
+                }
+                numberOfTuples++;
+            }
+        }
+        int frames = partitionManager.getPartition(0).getFramesUsed();
+        assertEquals(partitionManager.spillPartition(0), frames-1);
+        assertEquals(partitionManager.getTuplesProcessed(), numberOfTuples);
+        assertEquals(partitionManager.getTuplesSpilled(), numberOfTuples);
+        assertEquals(partitionManager.getTuplesInMemory(), 0);
         assertEquals(partitionManager.getSpilledStatus().cardinality(), 1);
         assertEquals(partitionManager.getBytesReloaded(), 0);
-        assertEquals(partitionManager.getBytesSpilled(), frameSize);
+        assertEquals(partitionManager.getBytesSpilled(), 5*frameSize);
 
     }
 
     @Test
-    void SpillLargePartition() throws HyracksDataException {
-        insertFrameToPartitionUntilFillBuffers(0, numberOfPartitions, 10);
+    public void SpillLargePartition() throws HyracksDataException {
+        InsertFrameToPartitionUntilFillBuffers(0, 10);
         assertEquals(partitionManager.spillPartition(0), 9); //Spill all but one
 
     }
 
     @Test
-    void SpillAndReloadPartition() throws HyracksDataException {
-        SpillPartition();
-        partitionManager.reloadPartition(0, false);
-        assertEquals(partitionManager.getTuplesProcessed(), 2);
+    public void SpillAndReloadPartition() throws HyracksDataException {
+        int numberOfTuples = 0;
+        for(int i=0;i<4;i++) {
+            tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
+            for(int j = 0; j<tupleAccessor.getTupleCount();j++){
+                if(!partitionManager.insertTuple(j)){
+                    break;
+                }
+                numberOfTuples++;
+            }
+        }
+        partitionManager.spillPartition(0);
+        assertTrue(partitionManager.reloadPartition(0, false));
+        assertEquals(partitionManager.getTuplesProcessed(), numberOfTuples);
         assertEquals(partitionManager.getTuplesSpilled(), 0);
-        assertEquals(partitionManager.getTuplesInMemory(), 2);
+        assertEquals(partitionManager.getTuplesInMemory(), numberOfTuples);
         assertEquals(partitionManager.getSpilledStatus().cardinality(), 0);
-        assertEquals(partitionManager.getBytesReloaded(), frameSize);
-        assertEquals(partitionManager.getBytesSpilled(), frameSize);
+        assertEquals(partitionManager.getBytesReloaded(), 5*frameSize);
+        assertEquals(partitionManager.getBytesSpilled(), 5*frameSize);
 
     }
 
     @Test
     public void GetSpilledPartitionWithLargestBuffer() throws HyracksDataException {
+        tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
         partitionManager.insertTuple(0);
+        tupleAccessor.reset(generateIntFrameToPartition(1).getBuffer());
         partitionManager.insertTuple(1);
         assertEquals(partitionManager.getTuplesInMemory(), 2);
         partitionManager.spillPartition(1);
         assertEquals(partitionManager.getTuplesInMemory(), 1);
-        partitionManager.insertTuple(numberOfPartitions + 1);
+        partitionManager.insertTuple(1);
         assertEquals(partitionManager.areAllPartitionsMemoryResident(), false);
         assertEquals(partitionManager.getSpilledStatus().nextSetBit(0), 1);
     }
 
     @Test
-    public void insertFrame() throws HyracksDataException {
+    public void TestTupleCounterComparator() throws HyracksDataException {
         IFrame frame = generateIntFrame();
         tupleAccessor.reset(frame.getBuffer());
-        int tuplesToInsert = tupleAccessor.getTupleCount();
-        for (int i = 0; i < tuplesToInsert; i++) {
-            partitionManager.insertTuple(i);
-        }
-        assertEquals(partitionManager.getTuplesInMemory(), tuplesToInsert);
-        assertEquals(partitionManager.getTotalMemory(), numberOfPartitions * frameSize);
-    }
-
-    @Test
-    public void testTupleCounterComparator() throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(0, numberOfPartitions);
-        insertFrameToPartitionUntilFillBuffers(1, numberOfPartitions, 5);
+        insertFrameToPartition(0);
+        InsertFrameToPartitionUntilFillBuffers(1, 5);
         List<Partition> resident = partitionManager.getMemoryResidentPartitions();
         PartitionComparatorBuilder builder = new PartitionComparatorBuilder();
         builder.addInMemoryTupleComparator(true);
@@ -195,24 +217,13 @@ class PartitionManagerTest {
         assertEquals(resident.get(0).getId(), 2);
     }
 
-    @Test
-    public void testStatusComparator() throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(3, numberOfPartitions);
-        partitionManager.spillPartition(3);
-        PartitionComparatorBuilder c = new PartitionComparatorBuilder();
-        c.addStatusComparator(true);
-        partitionManager.partitions.sort(c.build());
-        assertEquals(partitionManager.partitions.get(0).getId(), 3);
-    }
 
     @Test
-    public void testBufferSizeComparator() throws HyracksDataException {
+    public void TestBufferSizeComparator() throws HyracksDataException {
         IFrame frame = generateIntFrame();
         tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(0, numberOfPartitions);
-        insertFrameToPartitionUntilFillBuffers(1, numberOfPartitions, 5);
+        insertFrameToPartition(0);
+        InsertFrameToPartitionUntilFillBuffers(1, 5);
         List<Partition> resident = partitionManager.getMemoryResidentPartitions();
         PartitionComparatorBuilder builder = new PartitionComparatorBuilder();
         builder.addBufferSizeComparator(true);
@@ -221,65 +232,62 @@ class PartitionManagerTest {
     }
 
     @Test
-    public void testComposedComparator() throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(0, numberOfPartitions);
-        insertFrameToPartitionUntilFillBuffers(1, numberOfPartitions, 5);
-        partitionManager.spillPartition(1);
-        List<Partition> resident = partitionManager.partitions;
-        PartitionComparatorBuilder builder = new PartitionComparatorBuilder();
-        builder.addStatusComparator(true);
-        builder.addBufferSizeComparator(true);
-        builder.addInMemoryTupleComparator(true);
-        resident.sort(builder.build());
-        assertEquals(resident.get(0).getId(), 1);
-        assertEquals(resident.get(1).getId(), 0);
+    public void TestSpillToRelease() throws HyracksDataException {
+        assertEquals(partitionManager.getTotalFrames(),5);
+        for(int i=0;i<6;i++){
+            insertFrameToPartition(0);
+        }
+        assertEquals(partitionManager.getTotalFrames(),10);
+        insertFrameToPartition(0);
+        assertEquals(partitionManager.getTotalFrames(),5);
+
     }
 
-    @Test
-    public void getRSpilledWithLargestBuffer() throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(0, numberOfPartitions);
-        insertFrameToPartitionUntilFillBuffers(1, numberOfPartitions, 2);
-        assertEquals(partitionManager.spillPartition(0), 0);
-        assertEquals(partitionManager.spillPartition(1), 1);
-        assertEquals(partitionManager.getSpilledWithLargerBuffer(), 0);
-    }
-
-    @Test
-    public void getRSpilledWithSmallerBuffer() throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        insertFrameToPartition(0, numberOfPartitions);
-        insertFrameToPartitionUntilFillBuffers(1, numberOfPartitions, 2);
-        partitionManager.spillPartition(0);
-        partitionManager.spillPartition(1);
-        insertFrameToPartition(0, numberOfPartitions);
-        assertEquals(partitionManager.getSpilledWithSmallerBuffer(), 1);
-    }
-
-    public void insertFrameToPartitionUntilFillBuffers(int partitionId, int numberOfPartitions, int buffersToFill)
+    public void InsertFrameToPartitionUntilFillBuffers(int partitionId, int buffersToFill)
             throws HyracksDataException {
-        while (partitionManager.getPartition(partitionId).getMemoryUsed() < buffersToFill * frameSize) {
-            insertFrameToPartition(partitionId, numberOfPartitions);
+        while (partitionManager.getPartition(partitionId).getFramesUsed() < buffersToFill) {
+            insertFrameToPartition(partitionId);
         }
     }
 
-    public void insertFrameToPartition(int partitionId, int numberOfPartitions) throws HyracksDataException {
-        IFrame frame = generateIntFrame();
-        tupleAccessor.reset(frame.getBuffer());
-        int tuplesToInsert = tupleAccessor.getTupleCount() - partitionId;
-        for (int i = 0; i < tuplesToInsert; i += numberOfPartitions) {
-            partitionManager.insertTuple(i + partitionId);
-        }
+    private int tupleToInt(IFrameTupleAccessor accessor, int tupleId) {
+        tupleId += 1;
+        byte[] arr = accessor.getBuffer().array();
+        int t1 = accessor.getFieldEndOffset(tupleId, 0) + accessor.getTupleStartOffset(tupleId);
+        return ((arr[t1] & 0xFF) << 24) | ((arr[t1 + 1] & 0xFF) << 16) | ((arr[t1 + 2] & 0xFF) << 8)
+                | ((arr[t1 + 3] & 0xFF) << 0);
     }
 
-    private class simplePartitionComputer implements ITuplePartitionComputer {
+    protected class simplePartitionComputer implements ITuplePartitionComputer {
         @Override
         public int partition(IFrameTupleAccessor accessor, int tIndex, int nParts) throws HyracksDataException {
-            return tIndex % nParts;
+            return tupleToInt(accessor, tIndex) % nParts;
+        }
+    }
+
+    protected IFrame generateIntFrameToPartition(int id) throws HyracksDataException {
+        VSizeFrame buffer = new VSizeFrame(context);
+        int fieldCount = 1;
+        ArrayTupleBuilder tb = new ArrayTupleBuilder(fieldCount);
+        ArrayTupleReference tuple = new ArrayTupleReference();
+        FrameTupleAppender appender = new FrameTupleAppender();
+        appender.reset(buffer, true);
+        int i = 0;
+        while (appender.append(tb.getFieldEndOffsets(), tb.getByteArray(), 0, tb.getSize())) {
+            int n = (i++) * numberOfPartitions + id;
+            TupleUtils.createIntegerTuple(tb, tuple, n);
+            tuple.reset(tb.getFieldEndOffsets(), tb.getByteArray());
+        }
+        buffer.getFrameSize();
+        return buffer;
+    }
+
+    private void insertFrameToPartition(int id) throws HyracksDataException{
+        IFrame frame = generateIntFrameToPartition(id);
+        tupleAccessor.reset(frame.getBuffer());
+        int tupleCount = tupleAccessor.getTupleCount();
+        for(int i=0;i<tupleCount;i++){
+            partitionManager.insertTupleWithSpillPolicy(i,new PreferToSpillFullyOccupiedFramePolicy(bufferManager, partitionManager.getSpilledStatus()));
         }
     }
 
@@ -296,5 +304,6 @@ class PartitionManagerTest {
         }
         return buffer;
     }
+
 
 }

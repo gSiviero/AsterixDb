@@ -32,11 +32,12 @@ import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionComputer;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.PreferToSpillFullyOccupiedFramePolicy;
 
 public class PartitionManager {
-    public final List<Partition> partitions = new ArrayList<Partition>();
+    private final List<Partition> partitions = new ArrayList<Partition>();
     IFrame reloadBuffer;
     public BitSet spilledStatus;
     private IHyracksJobletContext context;
@@ -67,8 +68,8 @@ public class PartitionManager {
         reloadBuffer = new VSizeFrame(context);
         this.spilledStatus = spilledStatus;
         for (int i = 0; i < numberOfPartitions; i++) {
-            partitions.add(new Partition(i, bufferManager, context, frameTupleAccessor, frameTupleAppender,
-                    reloadBuffer, relationName));
+            partitions.add(new Partition(i, this.bufferManager, context, frameTupleAccessor, frameTupleAppender,
+                    reloadBuffer, relationName,1));
         }
         if (getTotalMemory() > bufferManager.getBufferPoolSize()) {
             throw new HyracksDataException(
@@ -85,39 +86,47 @@ public class PartitionManager {
         return partitions.stream().mapToInt(Partition::getTuplesInMemory).sum();
     }
 
+    /**
+     * Get the total number of tuples processed that are either in memory or spilled
+     * @return
+     */
     public int getTuplesProcessed() {
         return partitions.stream().mapToInt(Partition::getTuplesProcessed).sum();
     }
 
+    /**
+     * Get total tuples spilled to Disk
+     * @return
+     */
     public int getTuplesSpilled() {
         return partitions.stream().mapToInt(Partition::getTuplesSpilled).sum();
     }
-
-    public int getBytesSpilled() {
-        return partitions.stream().mapToInt(Partition::getBytesSpilled).sum();
+    
+    /**
+     * Get total number of bytes spilled,
+     * @return
+     */
+    public long getBytesSpilled() {
+        return partitions.stream().mapToLong(Partition::getBytesSpilled).sum();
     }
-
+    /**
+     * Get total number of bytes reloaded,
+     * @return
+     */
     public int getBytesReloaded() {
         return partitions.stream().mapToInt(Partition::getBytesReloaded).sum();
     }
 
-    public int getTuplesInMemoryFromResidentPartitions() {
-        List<Partition> residents = getMemoryResidentPartitions();
-        if (residents != null) {
-            return residents.stream().mapToInt(Partition::getTuplesInMemory).sum();
-        }
-        return 0;
+    /**
+     * Get Partition by Id
+     * @param id Partition's id
+     * @return IPartition
+     */
+    public IPartition getPartition(int id) {
+        return getPartitionById(id);
     }
-
-    //todo: Remove this method, its unsafe Or create a Interface for Partition to hide methods that should only be accessed by PartitionManager
-    public Partition getPartition(int id) {
-        for (int i = 0; i < partitions.size(); i++) {
-            Partition p = partitions.get(i);
-            if (p.getId() == id) {
-                return p;
-            }
-        }
-        return null;
+    public Partition getPartitionById(int id) {
+        return partitions.stream().filter(p -> p.getId() == id).findFirst().get();
     }
 
     /**
@@ -137,6 +146,10 @@ public class PartitionManager {
      */
     public double getTotalMemory() {
         return partitions.stream().mapToLong(Partition::getMemoryUsed).sum();
+    }
+
+    public long getTotalFrames() {
+        return partitions.stream().mapToLong(Partition::getFramesUsed).sum();
     }
 
     /**
@@ -163,6 +176,7 @@ public class PartitionManager {
     public void insertTupleWithSpillPolicy(int tupleId, PreferToSpillFullyOccupiedFramePolicy spillPolicy)
             throws HyracksDataException {
         int partitionId = partitionComputer.partition(tupleAccessor, tupleId, getNumberOfPartitions());
+
         while (!partitions.get(partitionId).insertTuple(tupleId)) {
             spillPartition(spillPolicy.selectVictimPartition(partitionId));
         }
@@ -185,7 +199,6 @@ public class PartitionManager {
     public List<Partition> getSpilledPartitions() {
         return partitions.stream().filter(Partition::getSpilledStatus).collect(Collectors.toList());
     }
-
     public List<Partition> getSpilledOrInconsistentPartitions() {
         return partitions.stream().filter(p -> p.getReloadedStatus() || p.getSpilledStatus())
                 .collect(Collectors.toList());
@@ -208,79 +221,30 @@ public class PartitionManager {
      * @throws HyracksDataException Exception
      */
     public int spillPartition(int id) throws HyracksDataException {
-        Partition p = getPartition(id);
-        int oldMemoryUsage = p.getMemoryUsed();
-        partitions.get(id).spill();
+        Partition partition = getPartitionById(id);
+        int oldMemoryUsage = partition.getMemoryUsed();
+        partition.spill();
         spilledStatus.set(id);
-        return (oldMemoryUsage - p.getMemoryUsed()) / context.getInitialFrameSize();
-    }
-
-    /**
-     * Spill all partition to Disk
-     *
-     * @return Number of Frames Released
-     * @throws HyracksDataException Exception
-     */
-    public int spillAll() throws HyracksDataException {
-        int framesReleased = 0;
-        for (Partition p : partitions) {
-            framesReleased += spillPartition(p.getId());
-        }
-        return framesReleased;
+        return (oldMemoryUsage - partition.getMemoryUsed()) / context.getInitialFrameSize();
     }
 
     //region [FIND PARTITION]
 
     /**
-     * Internal method to filter based on Buffer usage.
-     *
-     * @param partitions List of Partitions to be compared
-     * @param reversed   <b>TRUE</b> to use desc or <b>FALSE</b> to use asc
+     * Returns a list of partitions that are candidates to be spilled. <br>
+     * A Partition is a candidate if:
+     * <ul>
+     *     <li>Its buffer is larger than one FRAME</li>
+     * </ul>
+     * Candidate partitions are returned in order of:
+     * <ul>
+     *     <li>Spilled first</li>
+     *     <li>Than Larger Buffer first</li>
+     *     <li>Than larger number of tuples first</li>
+     * </ul>
      * @return
      */
-    private Partition bufferFilter(List<Partition> partitions, boolean reversed) {
-        Comparator<Partition> bufferComparator = Comparator.comparing(Partition::getMemoryUsed);
-        Comparator<Partition> tuplesInMemoryComparator = Comparator.comparing(Partition::getTuplesInMemory);
-        bufferComparator = bufferComparator.thenComparing((tuplesInMemoryComparator));
-        if (reversed)
-            bufferComparator = bufferComparator.reversed();
-        bufferComparator = bufferComparator.thenComparing(Partition::getId);
-        partitions.sort(bufferComparator);
-        return partitions.size() > 0 ? partitions.get(0) : null;
-    }
-
-    /**
-     * Get id of Spilled Partition with Larger Buffer:
-     * <ul>
-     *     <li>If two or mor partitions have the same buffer size (frames) than return the one with more tuples in memory</li>
-     *     <li>If there is a tie return the lowest id</li>
-     * </ul>
-     *
-     * @return Partition id
-     */
-    public int getSpilledWithLargerBuffer() {
-        List<Partition> spilled = getSpilledPartitions();
-        Partition p = bufferFilter(spilled, true);
-        if (p == null)
-            return -1;
-        return bufferFilter(spilled, true).getId();
-    }
-
-    /**
-     * Get id of Spilled Partition with Smaller Buffer:
-     * <ul>
-     *     <li>If two or mor partitions have the same buffer size (frames) than return the one with less tuples in memory</li>
-     *     <li>If there is a tie return the lowest id</li>
-     * </ul>
-     *
-     * @return Partition id
-     */
-    public int getSpilledWithSmallerBuffer() {
-        List<Partition> spilled = getSpilledPartitions();
-        return bufferFilter(spilled, false).getId();
-    }
-
-    public List<Partition> getSpillCandidatePartitions() {
+    private List<Partition> getSpillCandidatePartitions() {
         List<Partition> candidates =
                 partitions.stream().filter(p -> p.getFramesUsed() > 1).collect(Collectors.toList());
         PartitionComparatorBuilder comparator = new PartitionComparatorBuilder();
@@ -339,6 +303,19 @@ public class PartitionManager {
     }
 
     /**
+     * Close all spilled partitions, spilling all tuples that are spill in memory.s
+     *
+     * @throws HyracksDataException Exception
+     */
+    public void flushSpilledPartitions() throws HyracksDataException {
+        List<Partition> spilledPartitions = getSpilledPartitions();
+        for (Partition p : spilledPartitions) {
+            if (p.getTuplesProcessed() > 0)
+                p.spill();
+        }
+    }
+
+    /**
      * Reload partition from disk into memory
      *
      * @param id id of Partition to be reloaded.
@@ -346,7 +323,7 @@ public class PartitionManager {
      * @throws HyracksDataException Exception
      */
     public boolean reloadPartition(int id, boolean deleteAfterReload) throws HyracksDataException {
-        if (partitions.get(id).reload(deleteAfterReload)) {
+        if (getPartitionById(id).reload(deleteAfterReload)) {
             spilledStatus.clear(id);
             return true;
         }
@@ -401,5 +378,10 @@ public class PartitionManager {
             partition.cleanUp();
         }
     }
+
+    public long GetFilesSize(){
+        return this.partitions.stream().mapToLong(p -> p.getFileSize()).sum();
+    }
+
 
 }

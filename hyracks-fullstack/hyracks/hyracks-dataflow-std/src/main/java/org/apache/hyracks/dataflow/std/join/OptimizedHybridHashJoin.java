@@ -658,7 +658,7 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
     }
 
     @Override
-    public int updateMemoryBudget(int newBudget) throws HyracksDataException {
+    public int updateMemoryBudgetBuild(int newBudget) throws HyracksDataException {
         return 0;
         //Nothing to do here
     }
@@ -667,5 +667,10 @@ public class OptimizedHybridHashJoin implements IHybridHashJoin {
     public int updateMemoryBudgetProbe(int newBudget) throws HyracksDataException {
         return 0;
         //Do Nothing
+    }
+
+    @Override
+    public long getBuildFramesInMemory() {
+        return 0;
     }
 }
