@@ -19,6 +19,7 @@
  */
 package org.apache.hyracks.tests.integration;
 
+import java.nio.ByteBuffer;
 import java.util.BitSet;
 import java.util.Random;
 
@@ -55,7 +56,7 @@ public class PartitionTest {
     int totalNumberOfFrames = 10;
     IHyracksJobletContext context = TestUtils.create(frameSize).getJobletContext();
     RecordDescriptor recordDescriptor =
-            new RecordDescriptor(new ISerializerDeserializer[] { IntegerSerializerDeserializer.INSTANCE });
+            new RecordDescriptor(new ISerializerDeserializer[]{IntegerSerializerDeserializer.INSTANCE});
     Partition partition;
     BitSet status;
     IFrameTupleAccessor tupleAccessor;
@@ -70,18 +71,19 @@ public class PartitionTest {
         reloadBuffer = new VSizeFrame(context);
         framePool = new DeallocatableFramePool(context, totalNumberOfFrames * frameSize, true);
         bufferManager =
-                new VPartitionTupleBufferManager(null,numberOfPartitions,framePool);
+                new VPartitionTupleBufferManager(null, numberOfPartitions, framePool);
         status = new BitSet(numberOfPartitions);
         bufferManager.setConstrain(
                 PreferToSpillFullyOccupiedFramePolicy.createAtMostOneFrameForSpilledPartitionConstrain(status));
         tupleAccessor = new FrameTupleAccessor(recordDescriptor);
         tupleAppender = new FrameTupleAppender(new VSizeFrame(context));
         tupleAccessor.reset(generateIntFrame().getBuffer());
-        partition = new Partition(0, bufferManager, context, tupleAccessor, tupleAppender, reloadBuffer, "RelS",4);
+        partition = new Partition(0, bufferManager, context, tupleAccessor, tupleAppender, reloadBuffer, "RelS", 4);
     }
 
     /**
      * Insert a single tuple into Partition and check the number of tuples in memory, spilled and processed.
+     *
      * @throws HyracksDataException
      */
     @Test
@@ -91,10 +93,13 @@ public class PartitionTest {
         assertEquals(partition.getTuplesSpilled(), 0);
         assertEquals(partition.getTuplesInMemory(), 1);
         assertEquals(partition.getTuplesProcessed(), 1);
+        assertEquals(partition.getFramesUsed(), 1);
+        assertEquals(partition.getMemoryUsed(), frameSize);
     }
 
     /**
      * Spill Partition and check the number of tuples in memory, spilled and processed.
+     *
      * @throws HyracksDataException
      */
     @Test
@@ -110,22 +115,47 @@ public class PartitionTest {
         assertEquals(partition.getBytesReloaded(), 0);
     }
 
-    /**
-     * Reload the spilled Partition and check the numbers
-     * @throws HyracksDataException
-     */
     @Test
-    public void SpillAndReload10Times() throws HyracksDataException {
-        int numberOfTuplesProcessed =0;
+    public void SpillAndReload() throws HyracksDataException {
+        int numberOfTuplesProcessed = 0;
         for (int i = 0; i < 10; i++) {
             tupleAccessor.reset(generateIntFrame().getBuffer());
             numberOfTuplesProcessed += InsertFrame();
         }
-        for(int i = 0; i< 10 ;i++) {
+        partition.spill();
+        assertEquals(partition.getFileSize(), 10 * frameSize);
+        assertEquals(partition.getFramesUsed(), 0);
+        assertEquals(partition.reload(true, totalNumberOfFrames), true);
+        assertEquals(partition.getTuplesSpilled(), 0);
+        assertEquals(partition.getTuplesInMemory(), numberOfTuplesProcessed);
+        assertEquals(partition.getTuplesSpilled(), 0);
+        assertEquals(partition.getFramesUsed(), 10);
+        assertEquals(partition.getFileSize(), 0);
+        assertEquals(partition.getBytesReloaded(), 10 * frameSize);
+
+        tupleAccessor.reset(generateIntFrame().getBuffer());
+        numberOfTuplesProcessed += InsertFrame();
+        partition.spill();
+        assertEquals(partition.reload(true, totalNumberOfFrames), false); // Can´t fit Partition in Memory
+    }
+
+    /**
+     * Reload the spilled Partition and check the numbers
+     *
+     * @throws HyracksDataException
+     */
+    @Test
+    public void SpillAndReload10Times() throws HyracksDataException {
+        int numberOfTuplesProcessed = 0;
+        for (int i = 0; i < 10; i++) {
+            tupleAccessor.reset(generateIntFrame().getBuffer());
+            numberOfTuplesProcessed += InsertFrame();
+        }
+        for (int i = 0; i < 10; i++) {
             partition.spill();
             assertEquals(partition.getFileSize(), 10 * frameSize);
             assertEquals(partition.getFramesUsed(), 0);
-            assertEquals(partition.reload(true), true);
+            assertEquals(partition.reload(true, totalNumberOfFrames), true);
             assertEquals(partition.getTuplesSpilled(), 0);
             assertEquals(partition.getTuplesInMemory(), numberOfTuplesProcessed);
             assertEquals(partition.getTuplesSpilled(), 0);
@@ -136,23 +166,24 @@ public class PartitionTest {
         tupleAccessor.reset(generateIntFrame().getBuffer());
         numberOfTuplesProcessed += InsertFrame();
         partition.spill();
-        assertEquals(partition.reload(true), false); // Can´t fit Partition in Memory
+        assertEquals(partition.reload(true, totalNumberOfFrames), false); // Can´t fit Partition in Memory
     }
 
     /**
-     * Reload the spilled Partition and check the numbers
+     * Tries to reload the spilled Partition and check the numbers
+     *
      * @throws HyracksDataException
      */
     @Test
     public void ReloadError() throws HyracksDataException {
-        for(int i=0;i<11;i++){
+        for (int i = 0; i < 11; i++) {
             InsertFrame();
         }
-        assertEquals(partition.getFramesUsed(),1);
-        assertEquals(partition.getFileSize(),10*frameSize);
-        assertEquals(partition.reload(false),false);
-        assertEquals(partition.getFramesUsed(),1);
-        assertEquals(partition.getFileSize(),10*frameSize);
+        assertEquals(partition.getFramesUsed(), 1);
+        assertEquals(partition.getFileSize(), 10 * frameSize);
+        assertEquals(partition.reload(false, 9), false); //One frame is been used, so the amount of frames available is only 9.
+        assertEquals(partition.getFramesUsed(), 1);
+        assertEquals(partition.getFileSize(), 10 * frameSize);
     }
 
     @Test
@@ -184,15 +215,17 @@ public class PartitionTest {
 
     /**
      * Insert one frame and compare if the number of tuples inserted match.
+     *
      * @throws HyracksDataException
      */
     @Test
     public void InsertSingleFrame() throws HyracksDataException {
         assertEquals(InsertFrame(), partition.getTuplesProcessed());
     }
+
     @Test
     /**
-     * Insert 10 frames to partition, there should be spills since the Buffer Size is 10 Frames.
+     * Insert 20 frames to partition, there should be spills since the Buffer Size is 10 Frames.
      */
     public void Insert20Frames() throws HyracksDataException {
         int numberOfTuplesProcessed = 0;
@@ -209,10 +242,46 @@ public class PartitionTest {
         assertEquals(partition.getMemoryUsed(), 0);
         assertEquals(partition.getFramesUsed(), 0);
         assertEquals(partition.getFileSize(), 20 * frameSize);
-        assertEquals(partition.reload(true),false);
+        assertEquals(partition.reload(true, totalNumberOfFrames), false);
         partition.close();
         assertEquals(partition.getMemoryUsed(), 0);
         assertEquals(partition.getFramesUsed(), 0);
+    }
+
+    @Test
+    /**
+     * Insert frames to partition, with a CTarget of 5.
+     * It should spill the partition 2 times.
+     */
+    public void InsertFramesWithCtarget() throws HyracksDataException {
+        int numberOfTuplesProcessed = 0;
+        partition.setClusterTarget(5);
+        //It will only insert 10 frames due to the Frame Pool Size.
+        for (int i = 0; i < 10; i++) {
+            tupleAccessor.reset(generateIntFrame().getBuffer());
+            numberOfTuplesProcessed += InsertFrame();
+        }
+        assertEquals(numberOfTuplesProcessed, partition.getTuplesProcessed());
+        assertEquals(partition.getMemoryUsed(), 10 * frameSize);
+        assertEquals(partition.getFramesUsed(), 10);
+        assertEquals(partition.getFileSize(), 0);
+        partition.spill();
+        assertEquals(numberOfTuplesProcessed, partition.getTuplesProcessed());
+        assertEquals(partition.getMemoryUsed(), 0);
+        assertEquals(partition.getFramesUsed(), 0);
+        assertEquals(partition.getFileSize(), 10 * frameSize);
+        for (int i = 0; i < 5; i++) {
+            tupleAccessor.reset(generateIntFrame().getBuffer());
+            numberOfTuplesProcessed += InsertFrame();
+        }
+        assertEquals(partition.getFileSize(), 10 * frameSize);
+        assertEquals(partition.getMemoryUsed(), 5 * frameSize);
+        assertEquals(partition.getFramesUsed(), 5);
+        tupleAccessor.reset(generateIntFrame().getBuffer());
+        numberOfTuplesProcessed += InsertFrame();
+        assertEquals(partition.getFileSize(), 16 * frameSize);
+        assertEquals(partition.getMemoryUsed(), 1 * frameSize);
+        assertEquals(numberOfTuplesProcessed, partition.getTuplesProcessed());
     }
 
     @Test
@@ -224,9 +293,9 @@ public class PartitionTest {
         //It will only insert 10 frames due to the Frame Pool Size.
         for (int i = 0; i < 20; i++) {
             tupleAccessor.reset(generateIntFrame().getBuffer());
-            for(int j =0; j < tupleAccessor.getTupleCount();j++){
+            for (int j = 0; j < tupleAccessor.getTupleCount(); j++) {
                 partition.insertTuple(j);
-                numberOfTuplesProcessed ++;
+                numberOfTuplesProcessed++;
             }
         }
         assertNotEquals(numberOfTuplesProcessed, partition.getTuplesProcessed());
@@ -237,19 +306,18 @@ public class PartitionTest {
         assertEquals(partition.getMemoryUsed(), 0);
         assertEquals(partition.getFramesUsed(), 0);
         assertEquals(partition.getFileSize(), 10 * frameSize);
-        assertEquals(partition.reload(true),true);
+        assertEquals(partition.reload(true, totalNumberOfFrames), true);
         partition.close();
         assertEquals(partition.getMemoryUsed(), 0);
         assertEquals(partition.getFramesUsed(), 0);
     }
 
-
     /**
+     * @throws HyracksDataException
      * @Title Insert a Large Object into Partition.<br>
      * @Summary Altough this Object can fit in memory (Object < Memory Budget) ,
      * we insert partitions to make sure this object can't fit in the available memory,
      * this will force the object to be spilled.
-     * @throws HyracksDataException
      */
     @Test
     public void InsertLargeObject() throws HyracksDataException {
@@ -286,20 +354,20 @@ public class PartitionTest {
     /**
      * Insert tuples from Tuple Accessor into Partition,
      * If fails spill the partition.
+     *
      * @return
      * @throws HyracksDataException
      */
     int InsertFrame() throws HyracksDataException {
-        return InsertFrame(partition);
-    }
-
-    int InsertFrame(Partition p) throws HyracksDataException {
         int numberOfTuplesInFrame = tupleAccessor.getTupleCount();
-        tupleAccessor.reset(generateIntFrame().getBuffer());
-        for(int i = 0;i<numberOfTuplesInFrame;i++){
-            while(!p.insertTuple(i)){
-                p.spill();
-            };
+        ByteBuffer buffer = generateIntFrame().getBuffer();
+        assertEquals(buffer.array().length, frameSize);
+        tupleAccessor.reset(buffer);
+        for (int i = 0; i < numberOfTuplesInFrame; i++) {
+            while (!this.partition.insertTuple(i)) {
+                this.partition.spill();
+            }
+            ;
         }
         return numberOfTuplesInFrame;
     }
@@ -315,6 +383,7 @@ public class PartitionTest {
             TupleUtils.createIntegerTuple(tb, tuple, rnd.nextInt());
             tuple.reset(tb.getFieldEndOffsets(), tb.getByteArray());
         }
+        assertEquals(buffer.getFrameSize(), frameSize);
         return buffer;
     }
 
@@ -325,7 +394,7 @@ public class PartitionTest {
         ArrayTupleReference tuple = new ArrayTupleReference();
         FrameTupleAppender appender = new FrameTupleAppender();
         appender.reset(frame, true);
-        ISerializerDeserializer[] fieldSerdes = { new UTF8StringSerializerDeserializer() };
+        ISerializerDeserializer[] fieldSerdes = {new UTF8StringSerializerDeserializer()};
         String data = "";
         for (int i = 0; i < length; i++) {
             data += "X";

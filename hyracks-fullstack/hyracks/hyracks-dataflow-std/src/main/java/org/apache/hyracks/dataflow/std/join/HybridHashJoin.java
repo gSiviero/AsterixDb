@@ -20,7 +20,6 @@ package org.apache.hyracks.dataflow.std.join;
 
 import java.nio.ByteBuffer;
 import java.util.BitSet;
-import java.util.List;
 
 import org.apache.hyracks.api.comm.IFrameWriter;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
@@ -237,17 +236,18 @@ public class HybridHashJoin implements IHybridHashJoin {
      */
     protected void bringPartitionsBack(boolean print) throws HyracksDataException {
         int frameSize = jobletCtx.getInitialFrameSize();
+        int framesAvailable = (int) calculateFreeSpace()/frameSize;
         // Add one frame to freeSpace to consider the one frame reserved for the spilled partition
-        if (calculateFreeSpace() > 0) {
+        if (framesAvailable > 0) {
             for (Partition p : buildPartitionManager.getSpilledPartitions()) {
                 // Expected hash table size increase after reloading this partition
                 long expectedHashTableByteSizeIncrease = SerializableHashTable.calculateByteSizeDeltaForTableSizeChange(
                         buildPartitionManager.getTuplesInMemory(), p.getTuplesProcessed(), frameSize);
-                if (calculateFreeSpace() * jobletCtx.getInitialFrameSize() >= p.getFileSize() + expectedHashTableByteSizeIncrease) {
+                if (framesAvailable >= p.getFileSize() + expectedHashTableByteSizeIncrease) {
                     if (print) {
                         LOGGER.info(String.format("Reloading Partition %d", p.getId()));
                     }
-                    buildPartitionManager.reloadPartition(p.getId(), this.deleteAfterReload);
+                    buildPartitionManager.reloadPartition(p.getId(), this.deleteAfterReload,framesAvailable);
                     buildHashTable();
                 }
             }

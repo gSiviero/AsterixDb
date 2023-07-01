@@ -326,7 +326,4 @@ public class VPartitionTupleBufferManager implements IPartitionedTupleBufferMana
         return framePool.updateMemoryBudget(desiredSize);
     }
 
-    public void reserveBufer() throws HyracksDataException{
-        ByteBuffer buffer =framePool.allocateFrame(framePool.getMinFrameSize());
-    }
 }

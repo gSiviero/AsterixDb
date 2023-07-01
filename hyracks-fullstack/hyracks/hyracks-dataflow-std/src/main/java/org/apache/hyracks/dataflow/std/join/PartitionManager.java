@@ -71,7 +71,7 @@ public class PartitionManager {
             partitions.add(new Partition(i, this.bufferManager, context, frameTupleAccessor, frameTupleAppender,
                     reloadBuffer, relationName,1));
         }
-        if (getTotalMemory() > bufferManager.getBufferPoolSize()) {
+        if (numberOfPartitions*context.getInitialFrameSize() > bufferManager.getBufferPoolSize()) {
             throw new HyracksDataException(
                     "Number of Partitions can't be used. The memory budget in frames is smaller than the number of partitions");
         }
@@ -224,7 +224,7 @@ public class PartitionManager {
         Partition partition = getPartitionById(id);
         int oldMemoryUsage = partition.getMemoryUsed();
         partition.spill();
-        spilledStatus.set(id);
+//        spilledStatus.set(id);
         return (oldMemoryUsage - partition.getMemoryUsed()) / context.getInitialFrameSize();
     }
 
@@ -322,8 +322,8 @@ public class PartitionManager {
      * @return <b>TRUE</b> if reload was successfull.
      * @throws HyracksDataException Exception
      */
-    public boolean reloadPartition(int id, boolean deleteAfterReload) throws HyracksDataException {
-        if (getPartitionById(id).reload(deleteAfterReload)) {
+    public boolean reloadPartition(int id, boolean deleteAfterReload, int framesAvailable) throws HyracksDataException {
+        if (getPartitionById(id).reload(deleteAfterReload,framesAvailable)) {
             spilledStatus.clear(id);
             return true;
         }
@@ -347,10 +347,12 @@ public class PartitionManager {
      * @return
      */
     public BitSet getSpilledStatus() {
+        BitSet status = new BitSet(getNumberOfPartitions());
+        status.clear();
         for (Partition p : partitions) {
-            spilledStatus.set(p.getId(), p.getSpilledStatus());
+            status.set(p.getId(), p.getSpilledStatus());
         }
-        return spilledStatus;
+        return status;
     }
 
     /**
@@ -378,10 +380,4 @@ public class PartitionManager {
             partition.cleanUp();
         }
     }
-
-    public long GetFilesSize(){
-        return this.partitions.stream().mapToLong(p -> p.getFileSize()).sum();
-    }
-
-
 }

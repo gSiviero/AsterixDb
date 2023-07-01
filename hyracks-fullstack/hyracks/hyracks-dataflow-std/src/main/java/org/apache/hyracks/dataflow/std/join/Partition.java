@@ -168,9 +168,9 @@ public class Partition implements IPartition {
     }
 
     /**
-     * Get number of <b>BYTES</b> used by Partition.
+     * Get number of <b>FRAMES</b> used by Partition.
      *
-     * @return Number of <b>BYTES</b>
+     * @return Number of <b>FRAMES</b>
      */
     @Override
     public int getFramesUsed() {
@@ -218,7 +218,19 @@ public class Partition implements IPartition {
      */
     private final IHyracksJobletContext context;
     boolean closed = false;
-    int frameLimit= Integer.MAX_VALUE;
+    /**
+     * Maximum number of bytes a frame can hold.
+     * If a tuple is larger than this limit than it will be inserted as a large tuple.
+     * This condition is verified in {@link #insertTuple(int)}.
+     */
+    private int frameLimit= Integer.MAX_VALUE;
+
+    /**
+     * Cluster Target is defined as the limit of frames a spilled partition can hold.
+     * This is better described in
+     * <a href="https://www.vldb.org/conf/1994/P379.PDF"> Memory-Contention Responsive Hash Joins</a> section 3.1
+     */
+    private int clusterTarget = -1;
     //endregion
 
     //region [CONSTRUCTORS]
@@ -248,6 +260,14 @@ public class Partition implements IPartition {
         this.frameLimit = frameLimit;
     }
 
+    /**
+     * Set value of cluster target
+     * @param clusterTarget
+     */
+    public void setClusterTarget(int clusterTarget){
+        this.clusterTarget = clusterTarget;
+    }
+
     //endregion
 
     //region [METHODS]
@@ -264,10 +284,15 @@ public class Partition implements IPartition {
         int framesNeededForTuple = bufferManager.framesNeeded(frameTupleAccessor.getTupleLength(tupleId), 0);
         if (framesNeededForTuple * context.getInitialFrameSize() > bufferManager.getBufferPoolSize()) {
             throw HyracksDataException.create(ErrorCode.INSUFFICIENT_MEMORY);
-        } else if (framesNeededForTuple > this.frameLimit) {
+        }
+        else if (framesNeededForTuple > this.frameLimit) {
             insertLargeTuple(tupleId);
             return true;
-        } else if (bufferManager.insertTuple(this.id, frameTupleAccessor, tupleId, tuplePointer)) {
+        }
+        else if((getFramesUsed() >= this.clusterTarget+1)  && spilled && this.clusterTarget != -1){
+            return false;
+        }
+        if (bufferManager.insertTuple(this.id, frameTupleAccessor, tupleId, tuplePointer)) {
             tuplesInMemory++;
             return true;
         }
@@ -324,13 +349,20 @@ public class Partition implements IPartition {
         closed = true;
     }
 
+    public boolean reload(boolean deleteAfterReload,int framesAvailable) throws HyracksDataException{
+        if(this.getFileSize()/context.getInitialFrameSize() <= framesAvailable){
+            return reload(deleteAfterReload);
+        }
+        return false;
+    }
+
     /**
      * Reload partition from Disk.
      *
      * @return <b>TRUE</b> if Partition was reloaded successfully.<br> <b>FALSE</b> if something goes wrong.
      * @throws HyracksDataException Exception
      */
-    public boolean reload(boolean deleteAfterReload) throws HyracksDataException {
+    private boolean reload(boolean deleteAfterReload) throws HyracksDataException {
         if (!spilled)
             return true;
         createFileReaderIfNotExist();

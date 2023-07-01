@@ -43,6 +43,7 @@ import org.apache.hyracks.dataflow.std.buffermanager.IDeallocatableFramePool;
 import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.PreferToSpillFullyOccupiedFramePolicy;
 import org.apache.hyracks.dataflow.std.buffermanager.VPartitionTupleBufferManager;
+import org.apache.hyracks.dataflow.std.join.IPartition;
 import org.apache.hyracks.dataflow.std.join.Partition;
 import org.apache.hyracks.dataflow.std.join.PartitionComparatorBuilder;
 import org.apache.hyracks.dataflow.std.join.PartitionManager;
@@ -63,10 +64,11 @@ public class PartitionManagerTest {
     BitSet status;
     IFrameTupleAccessor tupleAccessor;
     IPartitionedTupleBufferManager bufferManager;
+    IDeallocatableFramePool framePool;
     private final Random rnd = new Random(50);
 
     public PartitionManagerTest() throws HyracksDataException {
-        IDeallocatableFramePool framePool = new DeallocatableFramePool(context, totalNumberOfFrames * frameSize, false);
+        framePool = new DeallocatableFramePool(context, totalNumberOfFrames * frameSize, false);
         bufferManager =
                 new VPartitionTupleBufferManager(null, numberOfPartitions, framePool);
         status = new BitSet(numberOfPartitions);
@@ -107,13 +109,13 @@ public class PartitionManagerTest {
     public void ConstructorTest() {
         assertEquals(partitionManager.getTuplesInMemory(), 0);
         assertEquals(partitionManager.getNumberOfPartitions(), 5);
-        assertEquals(partitionManager.getTotalMemory(), numberOfPartitions * frameSize,0);
+        assertEquals(partitionManager.getTotalMemory(), 0,0);
     }
 
     @Test
     public void InsertTuplesIntoPartitionTest() throws HyracksDataException {
-        assertEquals(partitionManager.getTotalFrames(), 5);
-        assertEquals(partitionManager.getPartition(0).getFramesUsed(),1);
+        assertEquals(partitionManager.getTotalFrames(), 0);
+        assertEquals(partitionManager.getPartition(0).getFramesUsed(),0);
         for(int i=0;i<5;i++) {
             tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
             for(int j = 0; j<tupleAccessor.getTupleCount();j++){
@@ -123,11 +125,11 @@ public class PartitionManagerTest {
             }
         }
         assertEquals(partitionManager.getPartition(0).getFramesUsed(),5);
-        assertEquals(partitionManager.getPartition(1).getFramesUsed(),1);
-        assertEquals(partitionManager.getPartition(2).getFramesUsed(),1);
-        assertEquals(partitionManager.getPartition(3).getFramesUsed(),1);
-        assertEquals(partitionManager.getPartition(4).getFramesUsed(),1);
-        assertEquals(partitionManager.getTotalFrames(),9);
+        assertEquals(partitionManager.getPartition(1).getFramesUsed(),0);
+        assertEquals(partitionManager.getPartition(2).getFramesUsed(),0);
+        assertEquals(partitionManager.getPartition(3).getFramesUsed(),0);
+        assertEquals(partitionManager.getPartition(4).getFramesUsed(),0);
+        assertEquals(partitionManager.getTotalFrames(),5);
         tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
         partitionManager.insertTuple(0);
         assertEquals(partitionManager.getPartition(0).getFramesUsed(),6);
@@ -146,7 +148,7 @@ public class PartitionManagerTest {
             }
         }
         int frames = partitionManager.getPartition(0).getFramesUsed();
-        assertEquals(partitionManager.spillPartition(0), frames-1);
+        assertEquals(partitionManager.spillPartition(0), frames);
         assertEquals(partitionManager.getTuplesProcessed(), numberOfTuples);
         assertEquals(partitionManager.getTuplesSpilled(), numberOfTuples);
         assertEquals(partitionManager.getTuplesInMemory(), 0);
@@ -159,14 +161,13 @@ public class PartitionManagerTest {
     @Test
     public void SpillLargePartition() throws HyracksDataException {
         InsertFrameToPartitionUntilFillBuffers(0, 10);
-        assertEquals(partitionManager.spillPartition(0), 9); //Spill all but one
-
+        assertEquals(partitionManager.spillPartition(0), 10); //Spill all
     }
 
     @Test
     public void SpillAndReloadPartition() throws HyracksDataException {
         int numberOfTuples = 0;
-        for(int i=0;i<4;i++) {
+        for(int i=0;i<5;i++) {
             tupleAccessor.reset(generateIntFrameToPartition(0).getBuffer());
             for(int j = 0; j<tupleAccessor.getTupleCount();j++){
                 if(!partitionManager.insertTuple(j)){
@@ -175,12 +176,14 @@ public class PartitionManagerTest {
                 numberOfTuples++;
             }
         }
-        partitionManager.spillPartition(0);
-        assertTrue(partitionManager.reloadPartition(0, false));
+        int framesAvailable = totalNumberOfFrames - (int) partitionManager.getTotalFrames();
+        assertEquals(partitionManager.spillPartition(0),5);
+        assertTrue(partitionManager.reloadPartition(0, false,framesAvailable));
         assertEquals(partitionManager.getTuplesProcessed(), numberOfTuples);
         assertEquals(partitionManager.getTuplesSpilled(), 0);
         assertEquals(partitionManager.getTuplesInMemory(), numberOfTuples);
         assertEquals(partitionManager.getSpilledStatus().cardinality(), 0);
+        Partition p = partitionManager.getPartitionById(0);
         assertEquals(partitionManager.getBytesReloaded(), 5*frameSize);
         assertEquals(partitionManager.getBytesSpilled(), 5*frameSize);
 
@@ -233,13 +236,13 @@ public class PartitionManagerTest {
 
     @Test
     public void TestSpillToRelease() throws HyracksDataException {
-        assertEquals(partitionManager.getTotalFrames(),5);
+        assertEquals(partitionManager.getTotalFrames(),0);
         for(int i=0;i<6;i++){
             insertFrameToPartition(0);
         }
-        assertEquals(partitionManager.getTotalFrames(),10);
+        assertEquals(partitionManager.getTotalFrames(),6);
         insertFrameToPartition(0);
-        assertEquals(partitionManager.getTotalFrames(),5);
+        assertEquals(partitionManager.getTotalFrames(),7);
 
     }
 
