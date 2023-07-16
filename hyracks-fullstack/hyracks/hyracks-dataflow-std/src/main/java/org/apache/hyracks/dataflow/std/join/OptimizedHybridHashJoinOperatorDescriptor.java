@@ -615,8 +615,8 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                     assert isLeftOuter ? !isReversed : true : "LeftOut Join can not reverse roles";
                     OptimizedHybridHashJoin rHHj;
                     int n = getNumberOfPartitions(state.memForJoin, tableSize, fudgeFactor, nPartitions);
-                    rHHj = new MemoryContentionResponsiveHHJ(jobletCtx, state.memForJoin, n, PROBE_REL, BUILD_REL, probeRd,
-                            buildRd, probeHpc, buildHpc, null, null, isLeftOuter, nonMatchWriterFactories); //checked-confirmed
+                    rHHj = new MemoryContentionResponsiveHHJ(jobletCtx, state.memForJoin, n, PROBE_REL, BUILD_REL,
+                            probeRd, buildRd, probeHpc, buildHpc, null, null, isLeftOuter, nonMatchWriterFactories); //checked-confirmed
 
                     rHHj.setIsReversed(isReversed);
                     try {

@@ -312,7 +312,7 @@ public class VPartitionTupleBufferManager implements IPartitionedTupleBufferMana
     }
 
     @Override
-    public boolean updateMemoryBudget(int newBudget){
+    public boolean updateMemoryBudget(int newBudget) {
         return framePool.updateMemoryBudget(newBudget);
     }
 

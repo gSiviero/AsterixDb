@@ -221,7 +221,6 @@ public class InMemoryHashJoin {
         table.close();
     }
 
-
     private void appendToResult(int probeSidetIx, int buildSidetIx, IFrameWriter writer) throws HyracksDataException {
         if (reverseOutputOrder) {
             FrameUtils.appendConcatToWriter(writer, appender, accessorBuild, buildSidetIx, accessorProbe, probeSidetIx);
