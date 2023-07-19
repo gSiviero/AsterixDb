@@ -254,15 +254,18 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
      * @param freeSpace     current free space
      * @param inMemTupCount number of tuples currently in memory
      * @return partition id of selected partition to reload
+     * @Todo Giulliano: Print what is the actual state in during the Event.
+     * Use Warn Logger Level.
+     *
      */
     protected int selectAPartitionToReloadProbe(long freeSpace, int inMemTupCount) {
         int frameSize = jobletCtx.getInitialFrameSize();
         // Add one frame to freeSpace to consider the one frame reserved for the spilled partition
-        long totalFreeSpace = freeSpace + frameSize;
+        long totalFreeSpace = freeSpace; //ToDo Giulliano: Check if it is working
         if (totalFreeSpace > 0) {
             for (int i = spilledStatus.nextSetBit(0); i >= 0 && i < numOfPartitions; i =
                     spilledStatus.nextSetBit(i + 1)) {
-                int spilledTupleCount = buildPSizeInTups[i];
+                int spilledTupleCount = buildPSizeInTups[i]; //Recalculate the number of Tuples based on the reloaded partition.
                 // Expected hash table size increase after reloading this partition
                 long originalHashTableSize = table.getCurrentByteSize();
                 totalFreeSpace += originalHashTableSize;
