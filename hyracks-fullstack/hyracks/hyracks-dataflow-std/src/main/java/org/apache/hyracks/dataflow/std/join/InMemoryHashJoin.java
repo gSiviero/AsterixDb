@@ -40,6 +40,7 @@ import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.std.buffermanager.ISimpleFrameBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.TupleInFrameListAccessor;
 import org.apache.hyracks.dataflow.std.structures.ISerializableTable;
+import org.apache.hyracks.dataflow.std.structures.SerializableHashTable;
 import org.apache.hyracks.dataflow.std.structures.TuplePointer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -162,8 +163,9 @@ public class InMemoryHashJoin {
      * Reads the given tuple from the probe side and joins it with tuples from the build side.
      * This method assumes that the accessorProbe is already set to the current probe frame.
      */
-    void join(int tid, IFrameWriter writer) throws HyracksDataException {
+    int join(int tid, IFrameWriter writer) throws HyracksDataException {
         boolean matchFound = false;
+        int numberMatched=0;
         if (isTableCapacityNotZero) {
             int entry = tpcProbe.partition(accessorProbe, tid, table.getTableSize());
             int tupleCount = table.getTupleCount(entry);
@@ -175,6 +177,7 @@ public class InMemoryHashJoin {
                 int c = tpComparator.compare(accessorProbe, tid, accessorBuild, tIndex);
                 if (c == 0) {
                     matchFound = true;
+                    numberMatched+=1;
                     appendToResult(tid, tIndex, writer);
                 }
             }
@@ -184,6 +187,7 @@ public class InMemoryHashJoin {
                     missingTupleBuild.getFieldEndOffsets(), missingTupleBuild.getByteArray(), 0,
                     missingTupleBuild.getSize());
         }
+        return numberMatched;
     }
 
     public void join(ByteBuffer buffer, IFrameWriter writer) throws HyracksDataException {
@@ -219,6 +223,10 @@ public class InMemoryHashJoin {
 
     public void closeTable() throws HyracksDataException {
         table.close();
+    }
+
+    public void resetTable(ISerializableTable newTable) throws HyracksDataException {
+        table = newTable;
     }
 
     private void appendToResult(int probeSidetIx, int buildSidetIx, IFrameWriter writer) throws HyracksDataException {
