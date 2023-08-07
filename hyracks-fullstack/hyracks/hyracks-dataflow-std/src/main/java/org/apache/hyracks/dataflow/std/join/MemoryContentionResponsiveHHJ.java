@@ -98,6 +98,7 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
         IDeallocatableFramePool framePool =
                 new DeallocatableFramePoolDynamicBudget(jobletCtx, memSizeInFrames * jobletCtx.getInitialFrameSize());
         initBuildInternal(framePool);
+        this.resourceBrokerOperator.setActualBudget(memSizeInFrames);
     }
 
     public void build(ByteBuffer buffer) throws HyracksDataException {
