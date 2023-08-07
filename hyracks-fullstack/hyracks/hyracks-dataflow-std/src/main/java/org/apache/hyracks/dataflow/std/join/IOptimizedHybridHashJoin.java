@@ -44,6 +44,7 @@ public interface IOptimizedHybridHashJoin {
     void initProbe(ITuplePairComparator comparator);
 
     void probe(ByteBuffer buffer, IFrameWriter writer) throws HyracksDataException;
+
     void completeProbe(IFrameWriter writer) throws HyracksDataException;
 
     void releaseResource() throws HyracksDataException;
@@ -67,4 +68,6 @@ public interface IOptimizedHybridHashJoin {
     void setIsReversed(boolean reversed);
 
     void setOperatorStats(IOperatorStats stats);
+
+    int getMemSizeInFrames();
 }

@@ -21,9 +21,8 @@ package org.apache.hyracks.dataflow.std.join;
 
 import java.nio.ByteBuffer;
 import java.util.BitSet;
-import java.util.Random;
+
 import org.apache.hyracks.api.comm.IFrameWriter;
-import org.apache.hyracks.api.comm.VSizeFrame;
 import org.apache.hyracks.api.context.IHyracksJobletContext;
 import org.apache.hyracks.api.dataflow.value.IMissingWriterFactory;
 import org.apache.hyracks.api.dataflow.value.IPredicateEvaluator;
@@ -31,7 +30,6 @@ import org.apache.hyracks.api.dataflow.value.ITuplePairComparator;
 import org.apache.hyracks.api.dataflow.value.ITuplePartitionComputer;
 import org.apache.hyracks.api.dataflow.value.RecordDescriptor;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
-import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
 import org.apache.hyracks.dataflow.std.buffermanager.DeallocatableFramePoolDynamicBudget;
@@ -43,7 +41,6 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
     private int processedFrames = 0;
     /**@todo: This is used to set margins for the memory update, it should not go to production code.**/
     private int originalBudget;
-    private Random random;
     ITuplePairComparator comparator;
 
     //region Knobs
@@ -76,9 +73,11 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
      **/
     private boolean probeInconsistentThisRound = true;
 
-    private boolean printMemoryState = true;
+    private boolean printMemoryState = false;
 
     int tuplesToProbeLater[];
+    private ResourceBrokerOperator resourceBrokerOperator;
+
 
     //endregion
     public MemoryContentionResponsiveHHJ(IHyracksJobletContext jobletCtx, int memSizeInFrames, int numOfPartitions,
@@ -87,13 +86,12 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
             IPredicateEvaluator buildPredEval, boolean isLeftOuter, IMissingWriterFactory[] nullWriterFactories1) {
         super(jobletCtx, memSizeInFrames, numOfPartitions, probeRelName, buildRelName, probeRd, buildRd, probeHpc,
                 buildHpc, probePredEval, buildPredEval, isLeftOuter, nullWriterFactories1);
-        originalBudget = memSizeInFrames;
-        random = new Random(-933090634); //This random seed is generating the Hash Table insertion Failure for my test query.
-//        int seed = new Random().nextInt();
-//        LOGGER.info("RANDOM SEED: " + seed);
-//        random = new Random(-258317876);
+        this.resourceBrokerOperator = ResourceBrokerFake.registerOperator(10000,1000,numOfPartitions);
+        originalBudget = this.resourceBrokerOperator.getBudget();
+        this.memSizeInFrames = originalBudget;
         tuplesToProbeLater = new int[numOfPartitions];
     }
+
 
     //region BUILD
     public void initBuild() throws HyracksDataException {
@@ -103,10 +101,8 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
     }
 
     public void build(ByteBuffer buffer) throws HyracksDataException {
-        if (frameInterval > 0 && processedFrames % frameInterval == 0) {
-            printMemoryState("BEFORE Updating Memory Budget");
+        if (this.resourceBrokerOperator.getStatus()) {
             updateMemoryBudgetBuildPhase();
-            printMemoryState("AFTER Updating Memory Budget");
         }
         super.build(buffer);
         processedFrames++;
@@ -120,14 +116,19 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
         }
     }
 
+
     /**
      * Updates Memory Budget During Build Phase
      */
     private void updateMemoryBudgetBuildPhase() throws HyracksDataException {
-        int newBudgetInFrames = random.nextInt(originalBudget) + this.originalBudget;
+        int newBudgetInFrames = this.resourceBrokerOperator.getBudget();;
+        if(newBudgetInFrames == -1){
+            return;
+        }
         if (newBudgetInFrames >= memSizeInFrames && memoryExpansionBuild) {
             bufferManager.updateMemoryBudget(newBudgetInFrames);
             memSizeInFrames = newBudgetInFrames;
+            this.resourceBrokerOperator.setActualBudget(memSizeInFrames);
         } else if (memoryContentionBuild) {
             while (!bufferManager.updateMemoryBudget(newBudgetInFrames)) {
                 int victimPartition = spillPolicy.findSpilledPartitionWithMaxMemoryUsage();
@@ -142,6 +143,7 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
                 memSizeInFrames -= framesToRelease;
                 memSizeInFrames = memSizeInFrames <= newBudgetInFrames ? newBudgetInFrames : memSizeInFrames;
             }
+            this.resourceBrokerOperator.setActualBudget(memSizeInFrames);
         }
     }
 
@@ -172,22 +174,22 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
         }
         try {
             super.probe(buffer, writer);
-        }
-        catch (Exception ex){
+        } catch (Exception ex) {
             throw new HyracksDataException(ex.getMessage());
         }
         processedFrames++;
     }
 
     private void updateMemoryBudgetProbePhase() throws HyracksDataException {
-        int newBudgetInFrames = random.nextInt(originalBudget) + this.originalBudget;
+        int newBudgetInFrames = this.resourceBrokerOperator.getBudget();
+        if(newBudgetInFrames == -1){
+            return;
+        }
         if (newBudgetInFrames > memSizeInFrames && memoryExpansionProbe) { //Memory Expansion Scenario
             if (bufferManager.updateMemoryBudget(newBudgetInFrames)) {
                 memSizeInFrames = newBudgetInFrames;
             }
-            printMemoryState("BEFORE Reloading Partition");
             memoryExpansionProbe();
-            printMemoryState("AFTER Rebuilding the Hash table");
         } else if (memoryContentionProbe) {
             memoryContentionPorbe(newBudgetInFrames);
         }
@@ -240,17 +242,14 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
                 bufferManager.flushPartition(partitionToReload, probeRFWriter);
                 bufferManager.clearPartition(partitionToReload);
                 inconsistentStatus.set(partitionToReload, true);
-                printMemoryState(String.format("After spilling Probe Tuples Partition %d", partitionToReload));
             }
-             //Reload Build Tuples from disk into memory.
+            //Reload Build Tuples from disk into memory.
             RunFileWriter buildRFWriter =
                     getSpillWriterOrCreateNewOneIfNotExist(buildRFWriters, buildRelName, partitionToReload);
             if (loadSpilledPartitionToMem(partitionToReload, buildRFWriter)) {
-                inconsistentStatus.set(partitionToReload,true);
-                printMemoryState(String.format("After reloading Build Tuples Partition %d", partitionToReload));
+                inconsistentStatus.set(partitionToReload, true);
                 rebuildHashTable();
-            }
-            else{
+            } else {
                 break;
             }
             fs = calculateFreeSpace();
@@ -301,8 +300,6 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
         return probeRFWriters[pid] == null ? null : probeRFWriters[pid].createReader();
     }
 
-
-
     /**
      * Rebuild Hash Table, it throws away the original hashtable and builds a new one.
      *
@@ -315,10 +312,6 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
         table = new SerializableHashTable(fs.tuplesInMemory, jobletCtx, bufferManagerForHashTable);
         this.inMemJoiner.resetTable(table);
         buildHashTable();
-        // Check if the Way I am calculating the free space is right?
-        // Size of the Hash Table should fit in my free space.
-        // Check the Actual Size of the Hash Table.
-        //
     }
 
     @Override
@@ -353,7 +346,7 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
             probeInconsistent(writer);
         }
         inMemJoiner.completeJoin(writer);
-        printMemoryState("After COMPLETE Probe");
+        ResourceBrokerFake.removeOperator(this.resourceBrokerOperator);
     }
 
     /**
@@ -363,10 +356,9 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
      * @throws HyracksDataException
      */
     private void probeInconsistent(IFrameWriter writer) throws HyracksDataException {
-        printMemoryState("Init Probe Inconsistent");
+        printMemoryState("Before probing Inconsistent");
         for (int i = inconsistentStatus.nextSetBit(0); i < numOfPartitions && i >= 0; i =
                 inconsistentStatus.nextSetBit(i + 1)) {
-            LOGGER.info(String.format("Probing Inconsistent %d",i));
             if (spilledStatus.get(i)) {
                 return;
             }
@@ -375,15 +367,13 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
                 reader.open();
                 while (reader.nextFrame(reloadBuffer)) {
                     super.probe(reloadBuffer.getBuffer(), writer);
-                    LOGGER.info("TUPLES TO PROBE: " + accessorProbe.getTupleCount());
-                    tuplesToProbeLater[i] = 0;
                 }
                 reader.setDeleteAfterClose(true);
                 reader.close();
                 inconsistentStatus.clear(i);
+                tuplesToProbeLater[i] = 0;
             }
         }
-        printMemoryState("Init Probe Inconsistent FINISH    ");
     }
 
     //endregion
@@ -408,21 +398,27 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
                     memSizeInFrames * jobletCtx.getInitialFrameSize()));
             LOGGER.info(String.format("Partitions Buffer: %2d FRAMES | %9d BYTES",
                     memUsed / jobletCtx.getInitialFrameSize(), memUsed));
-            if(this.table != null) {
+            if (this.table != null) {
                 LOGGER.info(String.format("Hash Table       : %2d FRAMES | %9d BYTES | %d ENTRIES",
-                        this.table.getCurrentByteSize() / jobletCtx.getInitialFrameSize(), this.table.getCurrentByteSize(),
-                        this.table.getTableSize()));
+                        this.table.getCurrentByteSize() / jobletCtx.getInitialFrameSize(),
+                        this.table.getCurrentByteSize(), this.table.getTableSize()));
             }
             long expectedHTSize =
                     SerializableHashTable.getExpectedTableByteSize(tuplesInMemory, jobletCtx.getInitialFrameSize());
             LOGGER.info(String.format("Exp. Hash Table  : %2d FRAMES | %9d BYTES | %d ENTRIES \n",
                     expectedHTSize / jobletCtx.getInitialFrameSize(), expectedHTSize, tuplesInMemory));
-            LOGGER.info("#####################################################################################################");
-            LOGGER.info("|                                         Partitions                                                |");
-            LOGGER.info("#####################################################################################################");
-            LOGGER.info("|---------------------------------------------------------------------------------------------------|");
-            LOGGER.info("|Partition |  Spilled | Inconsis |  Memory  | Build Tup| Build File| Probe Tup|Inc.Tuples|Probe File|");
-            LOGGER.info("|---------------------------------------------------------------------------------------------------|");
+            LOGGER.info(
+                    "#####################################################################################################");
+            LOGGER.info(
+                    "|                                         Partitions                                                |");
+            LOGGER.info(
+                    "#####################################################################################################");
+            LOGGER.info(
+                    "|---------------------------------------------------------------------------------------------------|");
+            LOGGER.info(
+                    "|Partition |  Spilled | Inconsis |  Memory  | Build Tup| Build File| Probe Tup|Inc.Tuples|Probe File|");
+            LOGGER.info(
+                    "|---------------------------------------------------------------------------------------------------|");
 
             for (int i = 0; i < this.numOfPartitions; i++) {
                 long buildFileSize = 0;
@@ -435,14 +431,16 @@ public class MemoryContentionResponsiveHHJ extends OptimizedHybridHashJoin {
                 }
                 memUsed += this.bufferManager.getPhysicalSize(i);
                 int probeTuples = 0;
-                if(probePSizeInTups != null){
+                if (probePSizeInTups != null) {
                     probeTuples = probePSizeInTups[i];
                 }
-                LOGGER.info(String.format("|%10d|%10b|%10b|%8d B|%10d|%8d B|%10d|%10d|%9d B|", i, this.spilledStatus.get(i),
-                        this.inconsistentStatus.get(i), this.bufferManager.getPhysicalSize(i), buildPSizeInTups[i],
-                        buildFileSize,probeTuples ,tuplesToProbeLater[i], probeFileSize));
+                LOGGER.info(
+                        String.format("|%10d|%10b|%10b|%8d B|%10d|%8d B|%10d|%10d|%9d B|", i, this.spilledStatus.get(i),
+                                this.inconsistentStatus.get(i), this.bufferManager.getPhysicalSize(i),
+                                buildPSizeInTups[i], buildFileSize, probeTuples, tuplesToProbeLater[i], probeFileSize));
             }
-            LOGGER.info("|---------------------------------------------------------------------------------------------------|");
+            LOGGER.info(
+                    "|---------------------------------------------------------------------------------------------------|");
         }
     }
 }

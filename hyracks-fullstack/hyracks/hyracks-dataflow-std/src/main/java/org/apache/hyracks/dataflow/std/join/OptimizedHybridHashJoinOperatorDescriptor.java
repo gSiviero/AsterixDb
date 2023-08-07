@@ -23,6 +23,9 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
+import java.util.Random;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import org.apache.hyracks.api.comm.IFrame;
 import org.apache.hyracks.api.comm.VSizeFrame;
@@ -124,7 +127,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
     private static final String PROBE_REL = "RelR";
     private static final String BUILD_REL = "RelS";
 
-    private final int memSizeInFrames;
+    private int memSizeInFrames;
     private final int inputsize0;
     private final double fudgeFactor;
     private final int[] probeKeys;
@@ -156,6 +159,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
             IMissingWriterFactory[] nonMatchWriterFactories) {
         super(spec, 2, 1);
         this.memSizeInFrames = memSizeInFrames;
+        ResourceBrokerFake.setMemBudget(memSizeInFrames);
         this.inputsize0 = inputsize0;
         this.fudgeFactor = factor;
         this.probeKeys = keys0;
@@ -182,6 +186,9 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                 buildHashFunctionFactories, recordDescriptor, tupPaircomparatorFactory01, tupPaircomparatorFactory10,
                 predEvalFactory0, predEvalFactory1, false, null);
     }
+
+
+
 
     @Override
     public void contributeActivities(IActivityGraphBuilder builder) {
@@ -298,6 +305,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                         throw new HyracksDataException("Not enough memory is assigend for Hybrid Hash Join.");
                     }
                     state.memForJoin = memSizeInFrames - 2;
+
                     state.numOfPartitions =
                             getNumberOfPartitions(state.memForJoin, inputsize0, fudgeFactor, nPartitions);
                     state.hybridHJ = new MemoryContentionResponsiveHHJ(ctx.getJobletContext(), state.memForJoin,
@@ -643,6 +651,8 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                                 rHHj.probe(rPartbuff.getBuffer(), writer);
                             }
                             rHHj.completeProbe(writer);
+                            memSizeInFrames = rHHj.getMemSizeInFrames();
+                            state.memForJoin = memSizeInFrames - 2;
                         } finally {
                             rHHj.releaseResource();
                         }

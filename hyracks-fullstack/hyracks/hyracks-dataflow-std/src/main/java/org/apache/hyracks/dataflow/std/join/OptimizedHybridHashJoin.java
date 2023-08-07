@@ -40,7 +40,6 @@ import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAccessor;
 import org.apache.hyracks.dataflow.common.comm.io.FrameTupleAppender;
 import org.apache.hyracks.dataflow.common.io.RunFileReader;
 import org.apache.hyracks.dataflow.common.io.RunFileWriter;
-import org.apache.hyracks.dataflow.common.utils.TupleUtils;
 import org.apache.hyracks.dataflow.std.buffermanager.DeallocatableFramePool;
 import org.apache.hyracks.dataflow.std.buffermanager.FramePoolBackedFrameBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.IDeallocatableFramePool;
@@ -48,7 +47,6 @@ import org.apache.hyracks.dataflow.std.buffermanager.IPartitionedTupleBufferMana
 import org.apache.hyracks.dataflow.std.buffermanager.ISimpleFrameBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.PreferToSpillFullyOccupiedFramePolicy;
 import org.apache.hyracks.dataflow.std.buffermanager.VPartitionTupleBufferManager;
-import org.apache.hyracks.dataflow.std.file.ITupleParser;
 import org.apache.hyracks.dataflow.std.structures.ISerializableTable;
 import org.apache.hyracks.dataflow.std.structures.SerializableHashTable;
 import org.apache.hyracks.dataflow.std.structures.TuplePointer;
@@ -60,19 +58,18 @@ import org.apache.logging.log4j.Logger;
  * relations. It is always called by the descriptor.
  */
 public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
-    private int debugMatched=0;
-    private int debugNotMatched=0;
-    private int debugMatchedCount=0;
+    private int debugMatched = 0;
+    private int debugNotMatched = 0;
+    private int debugMatchedCount = 0;
 
-    private int debugMatchedConsistent=0;
-    private int debugMatchedCCount=0;
-    private int debugNotMatchedConsistent=0;
-    int c=0;
+    private int debugMatchedConsistent = 0;
+    private int debugMatchedCCount = 0;
+    private int debugNotMatchedConsistent = 0;
+    int c = 0;
 
     protected static final Logger LOGGER = LogManager.getLogger();
     // Used for special probe BigObject which can not be held into the Join memory
     private FrameTupleAppender bigFrameAppender;
-
 
     protected BitSet inconsistentStatus;
 
@@ -233,7 +230,7 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
         if (buildRFWriters[pid] == null) {
             throw new HyracksDataException("Tried to close the non-existing file writer.");
         }
-//        buildRFWriters[pid].close();
+        //        buildRFWriters[pid].close();
     }
 
     protected RunFileWriter getSpillWriterOrCreateNewOneIfNotExist(RunFileWriter[] runFileWriters, String refName,
@@ -255,7 +252,7 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
         closeBuildInternal();
     }
 
-    protected void closeBuildInternal()  throws HyracksDataException{
+    protected void closeBuildInternal() throws HyracksDataException {
         // Makes the space for the in-memory hash table (some partitions may need to be spilled to the disk
         // during this step in order to make the space.)
         // and tries to bring back as many spilled partitions as possible if there is free space.
@@ -566,7 +563,6 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
         inMemJoiner.setComparator(comparator);
     }
 
-
     @Override
     public void probe(ByteBuffer buffer, IFrameWriter writer) throws HyracksDataException {
         accessorProbe.reset(buffer);
@@ -595,9 +591,7 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
                 }
             }
         }
-
     }
-
 
     private void processTupleProbePhase(int tupleId, int pid) throws HyracksDataException {
         if (!bufferManager.insertTuple(pid, accessorProbe, tupleId, tempPtr)) {
@@ -659,6 +653,10 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
         //We do NOT join the spilled partitions here, that decision is made at the descriptor level
         //(which join technique to use)
         inMemJoiner.completeJoin(writer);
+    }
+
+    public int getMemSizeInFrames() {
+        return memSizeInFrames;
     }
 
     @Override

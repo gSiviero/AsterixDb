@@ -40,7 +40,6 @@ import org.apache.hyracks.dataflow.common.comm.util.FrameUtils;
 import org.apache.hyracks.dataflow.std.buffermanager.ISimpleFrameBufferManager;
 import org.apache.hyracks.dataflow.std.buffermanager.TupleInFrameListAccessor;
 import org.apache.hyracks.dataflow.std.structures.ISerializableTable;
-import org.apache.hyracks.dataflow.std.structures.SerializableHashTable;
 import org.apache.hyracks.dataflow.std.structures.TuplePointer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -62,7 +61,6 @@ public class InMemoryHashJoin {
     private final TupleInFrameListAccessor tupleAccessor;
     // To release frames
     private final ISimpleFrameBufferManager bufferManager;
-    private final boolean isTableCapacityNotZero;
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -102,7 +100,6 @@ public class InMemoryHashJoin {
         reverseOutputOrder = reverse;
         this.tupleAccessor = new TupleInFrameListAccessor(rDBuild, buffers);
         this.bufferManager = bufferManager;
-        this.isTableCapacityNotZero = table.getTableSize() != 0;
         if (LOGGER.isTraceEnabled()) {
             LOGGER.trace("InMemoryHashJoin has been created for a table size of " + table.getTableSize()
                     + " for Thread ID " + Thread.currentThread().getId() + ".");
@@ -165,8 +162,8 @@ public class InMemoryHashJoin {
      */
     int join(int tid, IFrameWriter writer) throws HyracksDataException {
         boolean matchFound = false;
-        int numberMatched=0;
-        if (isTableCapacityNotZero) {
+        int numberMatched = 0;
+        if (table.getTableSize() != 0) {
             int entry = tpcProbe.partition(accessorProbe, tid, table.getTableSize());
             int tupleCount = table.getTupleCount(entry);
             for (int i = 0; i < tupleCount; i++) {
@@ -177,7 +174,7 @@ public class InMemoryHashJoin {
                 int c = tpComparator.compare(accessorProbe, tid, accessorBuild, tIndex);
                 if (c == 0) {
                     matchFound = true;
-                    numberMatched+=1;
+                    numberMatched += 1;
                     appendToResult(tid, tIndex, writer);
                 }
             }

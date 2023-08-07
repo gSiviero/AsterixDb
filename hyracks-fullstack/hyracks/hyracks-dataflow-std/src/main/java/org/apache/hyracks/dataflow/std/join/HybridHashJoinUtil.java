@@ -37,11 +37,11 @@ public class HybridHashJoinUtil {
      * Prints out the detailed information for partitions: in-memory and spilled partitions.
      * This method exists for a debug purpose.
      */
-    public static String printPartitionInfo(BitSet spilledStatus, SIDE whichSide, int numOfPartitions, int[] probePSizeInTups,
-            int[] buildPSizeInTups, RunFileWriter[] probeRFWriters, RunFileWriter[] buildRFWriters,
-            IPartitionedTupleBufferManager bufferManager) {
+    public static String printPartitionInfo(BitSet spilledStatus, SIDE whichSide, int numOfPartitions,
+            int[] probePSizeInTups, int[] buildPSizeInTups, RunFileWriter[] probeRFWriters,
+            RunFileWriter[] buildRFWriters, IPartitionedTupleBufferManager bufferManager) {
         StringBuilder buf = new StringBuilder();
-        buf.append(">>> "  + " " + Thread.currentThread().getId() + " printInfo():" + "\n");
+        buf.append(">>> " + " " + Thread.currentThread().getId() + " printInfo():" + "\n");
         if (whichSide == SIDE.BUILD) {
             buf.append("BUILD side" + "\n");
         } else {
