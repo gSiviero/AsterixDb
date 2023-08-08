@@ -46,17 +46,29 @@ public interface IIOManager extends Closeable {
     IFileHandle open(FileReference fileRef, FileReadWriteMode rwMode, FileSyncMode syncMode)
             throws HyracksDataException;
 
+    public IFileHandle openDir(FileReference fileRef, FileReadWriteMode rwMode, FileSyncMode syncMode)
+            throws HyracksDataException;
+
     int syncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
     long syncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException;
 
     int syncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
-    IAsyncRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
+    public int syncDirWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
-    IAsyncRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException;
+    public long syncDirWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException;
 
-    IAsyncRequest asyncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
+    IAsyncRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer data, boolean direct)
+            throws HyracksDataException;
+
+    IAsyncRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray, boolean direct)
+            throws HyracksDataException;
+
+    IAsyncRequest asyncRead(IFileHandle fHandle, long offset, ByteBuffer data, boolean direct)
+            throws HyracksDataException;
+
+    public int syncDirRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException;
 
     void close(IFileHandle fHandle) throws HyracksDataException;
 
@@ -71,6 +83,8 @@ public interface IIOManager extends Closeable {
     WritableByteChannel newWritableChannel(IFileHandle fileHandle);
 
     void deleteWorkspaceFiles() throws HyracksDataException;
+
+    public void closeDir(IFileHandle fHandle) throws HyracksDataException;
 
     /**
      * @param ioDeviceId

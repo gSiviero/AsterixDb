@@ -37,9 +37,10 @@ public class CloudFileHandle extends FileHandle {
     }
 
     @Override
-    public void open(IIOManager.FileReadWriteMode rwMode, IIOManager.FileSyncMode syncMode) throws IOException {
+    public void open(IIOManager.FileReadWriteMode rwMode, IIOManager.FileSyncMode syncMode, boolean dir)
+            throws IOException {
         if (fileRef.getFile().exists()) {
-            super.open(rwMode, syncMode);
+            super.open(rwMode, syncMode, dir);
         }
     }
 

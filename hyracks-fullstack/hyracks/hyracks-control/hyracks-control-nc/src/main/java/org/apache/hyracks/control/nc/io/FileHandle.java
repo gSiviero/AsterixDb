@@ -27,12 +27,18 @@ import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
 import org.apache.hyracks.api.io.IFileHandle;
 import org.apache.hyracks.api.io.IIOManager;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import net.smacke.jaydio.DirectRandomAccessFile;
 
 public class FileHandle implements IFileHandle {
 
     protected final FileReference fileRef;
     private RandomAccessFile raf;
     private String mode;
+    private static final Logger LOGGER = LogManager.getLogger();
+    private DirectRandomAccessFile draf;
 
     public FileHandle(FileReference fileRef) {
         this.fileRef = fileRef;
@@ -45,7 +51,8 @@ public class FileHandle implements IFileHandle {
      * @param syncMode
      * @throws IOException
      */
-    public void open(IIOManager.FileReadWriteMode rwMode, IIOManager.FileSyncMode syncMode) throws IOException {
+    public void open(IIOManager.FileReadWriteMode rwMode, IIOManager.FileSyncMode syncMode, boolean dir)
+            throws IOException {
         if (!fileRef.getFile().exists()) {
             throw HyracksDataException.create(ErrorCode.FILE_DOES_NOT_EXIST, fileRef.getAbsolutePath());
         }
@@ -72,7 +79,10 @@ public class FileHandle implements IFileHandle {
             default:
                 throw new IllegalArgumentException();
         }
-        ensureOpen();
+        if (!dir)
+            ensureOpen();
+        else
+            ensureOpenDir();
     }
 
     public synchronized void close() throws IOException {
@@ -81,6 +91,11 @@ public class FileHandle implements IFileHandle {
         }
         raf.close();
         raf = null;
+    }
+
+    //DirectRandomAccessFile calls linux O_DIRECT in order to bypass the OS Cache. Needed for experiment
+    public DirectRandomAccessFile getDraf() {
+        return draf;
     }
 
     @Override
@@ -112,5 +127,20 @@ public class FileHandle implements IFileHandle {
 
     public synchronized boolean isOpen() {
         return raf != null && raf.getChannel().isOpen();
+    }
+
+    public synchronized void ensureOpenDir() throws HyracksDataException {
+        if (raf != null) {
+            LOGGER.info("ensureOpenDir: raf is already open by RandomAccessFile");
+
+        }
+        if (draf == null) {
+            try {
+                draf = new DirectRandomAccessFile(fileRef.getFile(), mode, 32768);
+            } catch (IOException e) {
+                LOGGER.info("ensureOpenDir: Failed in opening file using DirectRandomAccessFile");
+                throw HyracksDataException.create(e);
+            }
+        }
     }
 }

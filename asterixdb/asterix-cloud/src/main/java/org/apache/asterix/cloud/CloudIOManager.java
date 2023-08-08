@@ -126,7 +126,7 @@ public class CloudIOManager extends IOManager {
         }
 
         try {
-            fHandle.open(rwMode, syncMode);
+            fHandle.open(rwMode, syncMode,true);
         } catch (IOException e) {
             throw HyracksDataException.create(e);
         }
@@ -326,7 +326,7 @@ public class CloudIOManager extends IOManager {
                 throw new IllegalStateException("Couldn't create local file");
             }
 
-            fileHandle.open(rwMode, syncMode);
+            fileHandle.open(rwMode, syncMode,true);
             writeToFile(fileHandle, inputStream, writeBuffer);
         } catch (IOException e) {
             throw HyracksDataException.create(e);

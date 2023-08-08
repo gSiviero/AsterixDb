@@ -57,6 +57,8 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import net.smacke.jaydio.DirectRandomAccessFile;
+
 public class IOManager implements IIOManager {
     /*
      * Constants
@@ -162,7 +164,19 @@ public class IOManager implements IIOManager {
             throws HyracksDataException {
         FileHandle fHandle = new FileHandle(fileRef);
         try {
-            fHandle.open(rwMode, syncMode);
+            fHandle.open(rwMode, syncMode, false);
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+        return fHandle;
+    }
+
+    @Override
+    public IFileHandle openDir(FileReference fileRef, FileReadWriteMode rwMode, FileSyncMode syncMode)
+            throws HyracksDataException {
+        FileHandle fHandle = new FileHandle(fileRef);
+        try {
+            fHandle.open(rwMode, syncMode, true);
         } catch (IOException e) {
             throw HyracksDataException.create(e);
         }
@@ -171,7 +185,7 @@ public class IOManager implements IIOManager {
 
     @Override
     public int syncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
-        IoRequest req = asyncWrite(fHandle, offset, data);
+        IoRequest req = asyncWrite(fHandle, offset, data, false);
         InvokeUtil.doUninterruptibly(req);
         try {
             if (req.getState() == State.OPERATION_SUCCEEDED) {
@@ -188,7 +202,41 @@ public class IOManager implements IIOManager {
 
     @Override
     public long syncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException {
-        IoRequest req = asyncWrite(fHandle, offset, dataArray);
+        IoRequest req = asyncWrite(fHandle, offset, dataArray, false);
+        InvokeUtil.doUninterruptibly(req);
+        try {
+            if (req.getState() == State.OPERATION_SUCCEEDED) {
+                return req.getWrites();
+            } else if (req.getState() == State.OPERATION_FAILED) {
+                throw req.getFailure();
+            } else {
+                throw new IllegalStateException("Write request completed with state " + req.getState());
+            }
+        } finally {
+            req.recycle();
+        }
+    }
+
+    @Override
+    public int syncDirWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+        IoRequest req = asyncWrite(fHandle, offset, data, true);
+        InvokeUtil.doUninterruptibly(req);
+        try {
+            if (req.getState() == State.OPERATION_SUCCEEDED) {
+                return req.getWrite();
+            } else if (req.getState() == State.OPERATION_FAILED) {
+                throw req.getFailure();
+            } else {
+                throw new IllegalStateException("Write request completed with state " + req.getState());
+            }
+        } finally {
+            req.recycle();
+        }
+    }
+
+    @Override
+    public long syncDirWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException {
+        IoRequest req = asyncWrite(fHandle, offset, dataArray, true);
         InvokeUtil.doUninterruptibly(req);
         try {
             if (req.getState() == State.OPERATION_SUCCEEDED) {
@@ -259,6 +307,70 @@ public class IOManager implements IIOManager {
         }
     }
 
+    public long doDirSyncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException {
+        try {
+            if (fHandle == null) {
+                throw new IllegalStateException("Trying to write to a deleted file.");
+            }
+            DirectRandomAccessFile fout = ((FileHandle) fHandle).getDraf();
+            int totalN = 0;
+            long len;
+            for (ByteBuffer data : dataArray) {
+                long pastFilePointer = fout.getFilePointer();
+                int n = 0;
+                int remaining = data.remaining();
+                while (remaining > 0) {
+                    fout.write(data.array(), 0, remaining);
+                    len = fout.getFilePointer() - pastFilePointer;
+                    pastFilePointer = fout.getFilePointer();
+                    if (len < 0) {
+                        throw new HyracksDataException(
+                                "Error writing to file: " + fHandle.getFileReference().toString());
+                    }
+                    remaining -= len;
+                    totalN += len;
+                    n += len;
+                    offset += len;
+                    data.position(n);
+                }
+            }
+            return totalN;
+        } catch (HyracksDataException e) {
+            throw e;
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    public int doDirSyncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+        try {
+            if (fHandle == null) {
+                throw new IllegalStateException("Trying to write to a deleted file.");
+            }
+            DirectRandomAccessFile fout = ((FileHandle) fHandle).getDraf();
+            int n = 0;
+            long len;
+            long pastFilePointer = fout.getFilePointer();
+            int remaining = data.remaining();
+            while (remaining > 0) {
+                fout.write(data.array(), 0, remaining);
+                len = fout.getFilePointer() - pastFilePointer;
+                pastFilePointer = fout.getFilePointer();
+                if (len < 0) {
+                    throw new HyracksDataException("Error writing to file: " + fHandle.getFileReference().toString());
+                }
+                remaining -= len;
+                n += len;
+                data.position(n);
+            }
+            return n;
+        } catch (HyracksDataException e) {
+            throw e;
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
     /**
      * Please do check the return value of this read!
      *
@@ -271,7 +383,7 @@ public class IOManager implements IIOManager {
      */
     @Override
     public int syncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
-        IoRequest req = asyncRead(fHandle, offset, data);
+        IoRequest req = asyncRead(fHandle, offset, data, false);
         InvokeUtil.doUninterruptibly(req);
         try {
             if (req.getState() == State.OPERATION_SUCCEEDED) {
@@ -279,7 +391,23 @@ public class IOManager implements IIOManager {
             } else if (req.getState() == State.OPERATION_FAILED) {
                 throw req.getFailure();
             } else {
-                throw new IllegalStateException("Reqd request completed with state " + req.getState());
+                throw new IllegalStateException("Read request completed with state " + req.getState());
+            }
+        } finally {
+            req.recycle();
+        }
+    }
+
+    public int syncDirRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+        IoRequest req = asyncRead(fHandle, offset, data, true);
+        InvokeUtil.doUninterruptibly(req);
+        try {
+            if (req.getState() == State.OPERATION_SUCCEEDED) {
+                return req.getRead();
+            } else if (req.getState() == State.OPERATION_FAILED) {
+                throw req.getFailure();
+            } else {
+                throw new IllegalStateException("Read request completed with state " + req.getState());
             }
         } finally {
             req.recycle();
@@ -312,11 +440,68 @@ public class IOManager implements IIOManager {
         }
     }
 
+    public int doDirSyncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+        try {
+            int n = 0;
+            int remaining = data.remaining();
+            DirectRandomAccessFile fin = ((FileHandle) fHandle).getDraf();
+            long pastFilePointer = fin.getFilePointer();
+            long len;
+            while (remaining > 0) {
+                fin.read(data.array(), 0, remaining);
+                len = fin.getFilePointer() - pastFilePointer;
+                if (len <= 0) {
+                    return n == 0 ? -1 : n;
+                }
+                remaining -= len;
+                offset += len;
+                n += len;
+                LOGGER.info("doDirSyncRead remaining: " + remaining + " offset: " + offset + "n: " + n);
+                //Wraps a byte array into a buffer.
+                //The new buffer will be backed by the given byte array; that is, modifications to the buffer will cause the array to be modified and vice versa.
+                // The new buffer's capacity will be array.length, its position will be offset, its limit will be offset + length, and its mark will be undefined.
+                // Its backing array will be the given array, and its array offset will be zero.
+                //                data.wrap(data.array(), (int) (len), remaining);
+                data.position((int) n);
+                LOGGER.info("doDirSyncRead data position: " + data.position() + "data limit: " + data.limit()
+                        + "data capacity: " + data.capacity());
+                pastFilePointer = fin.getFilePointer();
+                LOGGER.info("doDirSyncRead updated pastFilePointer: " + pastFilePointer);
+            }
+            LOGGER.info("doDirSyncRead read n: " + n);
+            return n;
+        } catch (ClosedByInterruptException e) {
+            Thread.currentThread().interrupt();
+            // re-open the closed channel. The channel will be closed during the typical file lifecycle
+            ((FileHandle) fHandle).ensureOpenDir();
+            throw HyracksDataException.create(e);
+        } catch (ClosedChannelException e) {
+            throw HyracksDataException.create(ErrorCode.CANNOT_READ_CLOSED_FILE, e, fHandle.getFileReference());
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
     @Override
-    public IoRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException {
+    public IoRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer[] dataArray, boolean direct)
+            throws HyracksDataException {
         IoRequest req = getOrAllocRequest();
         try {
-            req.write(fHandle, offset, dataArray);
+            req.write(fHandle, offset, dataArray, direct);
+        } catch (HyracksDataException e) {
+            req.recycle();
+            throw e;
+        }
+        LOGGER.info("end of asyncRead");
+        return req;
+    }
+
+    @Override
+    public IoRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer data, boolean direct)
+            throws HyracksDataException {
+        IoRequest req = getOrAllocRequest();
+        try {
+            req.write(fHandle, offset, data, direct);
         } catch (HyracksDataException e) {
             req.recycle();
             throw e;
@@ -325,22 +510,11 @@ public class IOManager implements IIOManager {
     }
 
     @Override
-    public IoRequest asyncWrite(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+    public IoRequest asyncRead(IFileHandle fHandle, long offset, ByteBuffer data, boolean direct)
+            throws HyracksDataException {
         IoRequest req = getOrAllocRequest();
         try {
-            req.write(fHandle, offset, data);
-        } catch (HyracksDataException e) {
-            req.recycle();
-            throw e;
-        }
-        return req;
-    }
-
-    @Override
-    public IoRequest asyncRead(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
-        IoRequest req = getOrAllocRequest();
-        try {
-            req.read(fHandle, offset, data);
+            req.read(fHandle, offset, data, direct);
         } catch (HyracksDataException e) {
             req.recycle();
             throw e;
@@ -352,6 +526,15 @@ public class IOManager implements IIOManager {
     public void close(IFileHandle fHandle) throws HyracksDataException {
         try {
             ((FileHandle) fHandle).close();
+        } catch (IOException e) {
+            throw HyracksDataException.create(e);
+        }
+    }
+
+    @Override
+    public void closeDir(IFileHandle fHandle) throws HyracksDataException {
+        try {
+            ((FileHandle) fHandle).getDraf().close();
         } catch (IOException e) {
             throw HyracksDataException.create(e);
         }

@@ -42,7 +42,7 @@ public class RunFileWriter implements IFrameWriter {
 
     @Override
     public void open() throws HyracksDataException {
-        handle = ioManager.open(file, IIOManager.FileReadWriteMode.READ_WRITE,
+        handle = ioManager.openDir(file, IIOManager.FileReadWriteMode.READ_WRITE,
                 IIOManager.FileSyncMode.METADATA_ASYNC_DATA_ASYNC);
         size = 0;
         failed = false;
@@ -56,13 +56,13 @@ public class RunFileWriter implements IFrameWriter {
 
     @Override
     public void fail() throws HyracksDataException {
-        ioManager.close(handle);
+        ioManager.closeDir(handle);
         failed = true;
     }
 
     @Override
     public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
-        int writen = ioManager.syncWrite(handle, size, buffer);
+        int writen = ioManager.syncDirWrite(handle, size, buffer);
         maxOutputFrameSize = Math.max(writen, maxOutputFrameSize);
         size += writen;
     }
@@ -70,7 +70,7 @@ public class RunFileWriter implements IFrameWriter {
     @Override
     public void close() throws HyracksDataException {
         if (!failed && handle != null) {
-            ioManager.close(handle);
+            ioManager.closeDir(handle);
         }
     }
 

@@ -32,6 +32,8 @@ public class IoRequest implements IAsyncRequest, InterruptibleAction {
         INITIAL,
         READ_REQUESTED,
         WRITE_REQUESTED,
+        DIRECTREAD_REQUESTED,
+        DIRECTWRITE_REQUESTED,
         OPERATION_FAILED,
         OPERATION_SUCCEEDED
     }
@@ -65,33 +67,36 @@ public class IoRequest implements IAsyncRequest, InterruptibleAction {
         failure = null;
     }
 
-    public void read(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+    public void read(IFileHandle fHandle, long offset, ByteBuffer data, boolean directRead)
+            throws HyracksDataException {
         if (state != State.INITIAL) {
             throw new IllegalStateException("Can't request a read operation through a " + state + " request");
         }
-        state = State.READ_REQUESTED;
+        state = directRead ? State.DIRECTREAD_REQUESTED : State.READ_REQUESTED;
         this.fHandle = fHandle;
         this.offset = offset;
         this.data = data;
         queue();
     }
 
-    public void write(IFileHandle fHandle, long offset, ByteBuffer[] dataArray) throws HyracksDataException {
+    public void write(IFileHandle fHandle, long offset, ByteBuffer[] dataArray, boolean directWrite)
+            throws HyracksDataException {
         if (state != State.INITIAL) {
             throw new IllegalStateException("Can't request a write operation through a " + state + " request");
         }
-        state = State.WRITE_REQUESTED;
+        state = directWrite ? State.DIRECTREAD_REQUESTED : State.WRITE_REQUESTED;
         this.fHandle = fHandle;
         this.offset = offset;
         this.dataArray = dataArray;
         queue();
     }
 
-    public void write(IFileHandle fHandle, long offset, ByteBuffer data) throws HyracksDataException {
+    public void write(IFileHandle fHandle, long offset, ByteBuffer data, boolean directWrite)
+            throws HyracksDataException {
         if (state != State.INITIAL) {
             throw new IllegalStateException("Can't request a write operation through a " + state + " request");
         }
-        state = State.WRITE_REQUESTED;
+        state = directWrite ? State.DIRECTWRITE_REQUESTED : State.WRITE_REQUESTED;
         this.fHandle = fHandle;
         this.offset = offset;
         this.data = data;
@@ -123,9 +128,21 @@ public class IoRequest implements IAsyncRequest, InterruptibleAction {
                 if (data != null) {
                     // single buffer
                     write = ioManager.doSyncWrite(fHandle, offset, data);
+
                 } else {
                     // multiple buffers
                     writes = ioManager.doSyncWrite(fHandle, offset, dataArray);
+                }
+            } else if (state == State.DIRECTREAD_REQUESTED) {
+                read = ioManager.doDirSyncRead(fHandle, offset, data);
+            } else if (state == State.DIRECTWRITE_REQUESTED) {
+                if (data != null) {
+                    // single buffer
+
+                    write = ioManager.doDirSyncWrite(fHandle, offset, data);
+                } else {
+                    // multiple buffers
+                    writes = ioManager.doDirSyncWrite(fHandle, offset, dataArray);
                 }
             } else {
                 throw new IllegalStateException("IO Request with state = " + state);
