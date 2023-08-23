@@ -55,13 +55,12 @@ public class InMemoryHashJoin {
     private ITuplePairComparator tpComparator;
     private final boolean isLeftOuter;
     private final ArrayTupleBuilder missingTupleBuild;
-    private final ISerializableTable table;
+    private ISerializableTable table;
     private final TuplePointer storedTuplePointer;
     private final boolean reverseOutputOrder; //Should we reverse the order of tuples, we are writing in output
     private final TupleInFrameListAccessor tupleAccessor;
     // To release frames
     private final ISimpleFrameBufferManager bufferManager;
-    private final boolean isTableCapacityNotZero;
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -101,7 +100,6 @@ public class InMemoryHashJoin {
         reverseOutputOrder = reverse;
         this.tupleAccessor = new TupleInFrameListAccessor(rDBuild, buffers);
         this.bufferManager = bufferManager;
-        this.isTableCapacityNotZero = table.getTableSize() != 0;
         if (LOGGER.isTraceEnabled()) {
             LOGGER.trace("InMemoryHashJoin has been created for a table size of " + table.getTableSize()
                     + " for Thread ID " + Thread.currentThread().getId() + ".");
@@ -164,7 +162,7 @@ public class InMemoryHashJoin {
      */
     void join(int tid, IFrameWriter writer) throws HyracksDataException {
         boolean matchFound = false;
-        if (isTableCapacityNotZero) {
+        if (table.getTableSize() != 0) {
             int entry = tpcProbe.partition(accessorProbe, tid, table.getTableSize());
             int tupleCount = table.getTupleCount(entry);
             for (int i = 0; i < tupleCount; i++) {
@@ -219,6 +217,10 @@ public class InMemoryHashJoin {
 
     public void closeTable() throws HyracksDataException {
         table.close();
+    }
+
+    public void resetTable(ISerializableTable newTable) throws HyracksDataException {
+        table = newTable;
     }
 
     private void appendToResult(int probeSidetIx, int buildSidetIx, IFrameWriter writer) throws HyracksDataException {

@@ -456,19 +456,19 @@ public class IOManager implements IIOManager {
                 remaining -= len;
                 offset += len;
                 n += len;
-                LOGGER.info("doDirSyncRead remaining: " + remaining + " offset: " + offset + "n: " + n);
+//                LOGGER.info("doDirSyncRead remaining: " + remaining + " offset: " + offset + "n: " + n);
                 //Wraps a byte array into a buffer.
                 //The new buffer will be backed by the given byte array; that is, modifications to the buffer will cause the array to be modified and vice versa.
                 // The new buffer's capacity will be array.length, its position will be offset, its limit will be offset + length, and its mark will be undefined.
                 // Its backing array will be the given array, and its array offset will be zero.
                 //                data.wrap(data.array(), (int) (len), remaining);
                 data.position((int) n);
-                LOGGER.info("doDirSyncRead data position: " + data.position() + "data limit: " + data.limit()
-                        + "data capacity: " + data.capacity());
+//                LOGGER.info("doDirSyncRead data position: " + data.position() + "data limit: " + data.limit()
+//                        + "data capacity: " + data.capacity());
                 pastFilePointer = fin.getFilePointer();
-                LOGGER.info("doDirSyncRead updated pastFilePointer: " + pastFilePointer);
+//                LOGGER.info("doDirSyncRead updated pastFilePointer: " + pastFilePointer);
             }
-            LOGGER.info("doDirSyncRead read n: " + n);
+//            LOGGER.info("doDirSyncRead read n: " + n);
             return n;
         } catch (ClosedByInterruptException e) {
             Thread.currentThread().interrupt();

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 
+import net.smacke.jaydio.DirectRandomAccessFile;
 import org.apache.hyracks.api.exceptions.ErrorCode;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.hyracks.api.io.FileReference;
@@ -30,7 +31,6 @@ import org.apache.hyracks.api.io.IIOManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import net.smacke.jaydio.DirectRandomAccessFile;
 
 public class FileHandle implements IFileHandle {
 

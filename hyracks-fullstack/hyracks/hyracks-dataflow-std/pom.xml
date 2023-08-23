@@ -98,5 +98,11 @@
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-api</artifactId>
     </dependency>
+      <dependency>
+          <groupId>com.couchbase.client</groupId>
+          <artifactId>core-io</artifactId>
+          <version>1.7.2</version>
+          <scope>compile</scope>
+      </dependency>
   </dependencies>
 </project>
