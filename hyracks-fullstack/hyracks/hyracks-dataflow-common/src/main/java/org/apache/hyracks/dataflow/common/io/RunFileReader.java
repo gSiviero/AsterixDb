@@ -48,7 +48,7 @@ public class RunFileReader implements IFrameReader {
     @Override
     public void open() throws HyracksDataException {
         // Opens RW mode because we need to truncate the given file if required.
-        handle = ioManager.openDir(file, IIOManager.FileReadWriteMode.READ_ONLY,
+        handle = ioManager.open(file, IIOManager.FileReadWriteMode.READ_ONLY,
                 IIOManager.FileSyncMode.METADATA_ASYNC_DATA_ASYNC);
         readPtr = 0;
     }
@@ -71,7 +71,7 @@ public class RunFileReader implements IFrameReader {
         }
         frame.reset();
 
-        int readLength = ioManager.syncDirRead(handle, readPtr, frame.getBuffer());
+        int readLength = ioManager.syncRead(handle, readPtr, frame.getBuffer());
         if (readLength <= 0) {
             throw HyracksDataException.create(ErrorCode.EOF);
         }
@@ -79,7 +79,7 @@ public class RunFileReader implements IFrameReader {
         frame.ensureFrameSize(frame.getMinSize() * FrameHelper.deserializeNumOfMinFrame(frame.getBuffer()));
         if (frame.getBuffer().hasRemaining()) {
             if (readPtr < size) {
-                readLength = ioManager.syncDirRead(handle, readPtr, frame.getBuffer());
+                readLength = ioManager.syncRead(handle, readPtr, frame.getBuffer());
                 if (readLength < 0) {
                     throw HyracksDataException.create(ErrorCode.EOF);
                 }
@@ -100,13 +100,13 @@ public class RunFileReader implements IFrameReader {
         }
         if (deleteAfterClose) {
             try {
-                ioManager.closeDir(handle);
+                ioManager.close(handle);
                 FileUtils.deleteQuietly(file.getFile());
             } catch (IOException e) {
                 throw HyracksDataException.create(ErrorCode.CANNOT_DELETE_FILE, e, file.toString());
             }
         } else {
-            ioManager.closeDir(handle);
+            ioManager.close(handle);
         }
         handle = null;
     }

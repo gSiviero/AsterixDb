@@ -23,7 +23,7 @@
   </CustomLevels>
   <Appenders>
     <Console name="Console" target="SYSTEM_OUT">
-      <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} -  %msg%n"/>
     </Console>
     <Console name="AccessLog" target="SYSTEM_OUT">
       <PatternLayout pattern="%m%n"/>
@@ -31,10 +31,14 @@
     <Console name="TracerLog" target="SYSTEM_OUT">
       <PatternLayout pattern="%m%n"/>
     </Console>
+    <File name="MyFile" fileName="/home/dbis/Desktop/dbisLogs.log">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} -  %msg%n"/>
+    </File>
   </Appenders>
   <Loggers>
     <Root level="WARN">
       <AppenderRef ref="Console"/>
+      <appender-ref ref="MyFile"/>
     </Root>
     <Logger name="org.apache.hyracks.control.nc.service" level="INFO"/>
     <Logger name="org.apache.hyracks.http.server.CLFLogger" level="ACCESS" additivity="false">

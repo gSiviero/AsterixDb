@@ -18,10 +18,10 @@
  */
 
 package org.apache.hyracks.dataflow.std.join;
+import org.apache.hyracks.api.exceptions.HyracksDataException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.time.Duration;
 import java.util.*;
 
 
@@ -30,75 +30,94 @@ public class ResourceBrokerFake {
 
     //create an object of SingleObject
 
-    private Timer timerScenario = new Timer();
 
     protected static final Logger LOGGER = LogManager.getLogger();
-    private static ArrayList<ResourceBrokerOperator> operators = new ArrayList<ResourceBrokerOperator>();
     private int nextId = 0;
-    private static int totalMemoryBudget = 0;
-    private static Random random = new Random();
-    private static ResourceBrokerFake instance = new ResourceBrokerFake();
-
-    private class TimerTaskScenario extends TimerTask{
-        public void run() {
-            timerScenario.cancel();
-            timerScenario = new Timer();
-            timerScenario.schedule(new TimerTaskScenario(),getExponential(10));
-        }
+    /**
+     * Target Memory In Frames
+     * If the Distribution is Static, this will be the actual memory all the time.
+     * If the Distribution is Gaussian, this will be the mean.
+     * If the Distribution is Uniform this is the maximum memory.
+     */
+    private static int maxMemory = 0;
+    private static int minimumMemory = 0;
+    /**
+     * This parameter is used by the Gaussian distribution. It is the standard deviation.<br/>
+     * During 95.5% of the time the generated budget will be: <br/><br/>
+     * <b>targetMemory - 2*sigma < B < targetMemory + 2*sigma</b>
+     */
+    private static int sigma = 0;
+    private static final Random random = new Random();
+    private static final ResourceBrokerFake instance = new ResourceBrokerFake();
+    private static MemoryDistributionType type;
+    public enum MemoryDistributionType{
+        Uniform,
+        Gaussian,
+        Static,
     }
+    private static int counter = 0;
+
+
     //make the constructor private so that this class cannot be
     //instantiated
     private ResourceBrokerFake(){
-        TimerTask task = new TimerTask() {
-            public void run() {
-                distributeBudget();
-            }
-        };
-        Timer timer = new Timer();
-        timer.schedule(task,0,10);
-//        timerScenario.schedule(new TimerTaskScenario(),getExponential(1));
+        counter = random.nextInt(4);
     }
 
-    public int getExponential(int lambda) {
-        return (int) Math.log(1- random.nextDouble())*-lambda;
-    }
-
-    private static void distributeBudget(){
-        operators.forEach((o) -> {
-            if(o.getStatus()){
-                o.setNewBudget(Math.max(o.minimumMemory, generateNewBudget()));
+    public static int generateNewBudget() {
+        counter++;
+        counter = counter % 5;
+        switch (type) {
+            case Gaussian:
+                return generateGaussian();
+            case Uniform:
+                return generateUniform();
+            default:
+                return maxMemory;
         }
-        });
     }
 
-    private static int generateNewBudget(){
-        int newBudget = 0;
-//        if(random.nextInt(100) < 80){
-//            newBudget = random.nextInt(totalMemoryBudget);
-//        }
-//        else{
-            int lowerBound = (int) Math.ceil(0.8*totalMemoryBudget);
-            int variance = (int) Math.ceil(0.2*totalMemoryBudget);
-            newBudget =  lowerBound + random.nextInt(variance);
-//        }
-        return newBudget;
+    public static int generateStartingBudget() {
+        return maxMemory - random.nextInt((int) (0.2*maxMemory) );
     }
 
-    public static void setMemBudget(int memoryInFrames){
-        totalMemoryBudget = memoryInFrames;
+    private static int generateUniform(){
+        if(counter != 0){
+            return maxMemory - random.nextInt((int) (0.2*maxMemory) );
+        }
+        return minimumMemory + random.nextInt(maxMemory-minimumMemory);
     }
 
-    public static ResourceBrokerOperator registerOperator(int largerRelationSize,int smallerRelationSize,int minimumMemory){
-        ResourceBrokerOperator operator = new ResourceBrokerOperator(instance.nextId, minimumMemory,totalMemoryBudget);
-        operators.add(operator);
-        instance.nextId++;
-        return operator;
+    private static int generateGaussian(){
+        return (int) random.nextGaussian()*sigma + maxMemory;
     }
 
-    public static void removeOperator(ResourceBrokerOperator operator){
-        operator.printStats();
-        operators.remove(operator);
+    /**
+     * Configure the Resource Broker.
+     * @param tgtMemory
+     * @param distributionType
+     * @param sig
+     */
+    public static void configure(int tgtMemory,int minMemory,MemoryDistributionType distributionType,int sig) {
+        maxMemory = tgtMemory;
+        if(distributionType == MemoryDistributionType.Gaussian){
+            if(tgtMemory*3*sig > tgtMemory) {
+                LOGGER.info("Target Memory + 3 sigma must be larger than minimum memory");
+            }
+            maxMemory = tgtMemory - 3*sig;
+        }
+        if(distributionType == MemoryDistributionType.Uniform && minMemory > tgtMemory){
+            LOGGER.info("Target Memory must be larger than minimum memory");
+        }
+        type = distributionType;
+        sigma=sig;
+    }
+
+
+    public static void updateMinimumMemory(int minMemory){
+        minimumMemory = minMemory;
     }
 
 }
+
 

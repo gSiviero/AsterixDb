@@ -58,15 +58,12 @@ import org.apache.logging.log4j.Logger;
  * relations. It is always called by the descriptor.
  */
 public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
-    private int debugMatched = 0;
-    private int debugNotMatched = 0;
-    private int debugMatchedCount = 0;
+    protected int buildFrames = 0;
+    protected int probeFrames;
 
-    private int debugMatchedConsistent = 0;
-    private int debugMatchedCCount = 0;
-    private int debugNotMatchedConsistent = 0;
+    protected long inMemPartitionsBuildSum = 0;
+    protected long inMemPartitionsProbeSum = 0;
     int c = 0;
-
     protected static final Logger LOGGER = LogManager.getLogger();
     // Used for special probe BigObject which can not be held into the Join memory
     private FrameTupleAppender bigFrameAppender;
@@ -140,7 +137,6 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
                 nonMatchWriters[i] = nullWriterFactories1[i].createMissingWriter();
             }
         }
-
         inconsistentStatus = new BitSet(numOfPartitions);
         inconsistentStatus.clear();
     }
@@ -174,13 +170,20 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
                 buildPSizeInTups[pid]++;
             }
         }
+        buildFrames++;
+        inMemPartitionsBuildSum += numOfPartitions - spilledStatus.cardinality();
     }
 
     protected void processTupleBuildPhase(int tid, int pid) throws HyracksDataException {
-        processTupleBuildPhaseInternal(tid, pid);
+        int victim = processTupleBuildPhaseInternal(tid, pid);
+        while(victim != -1){
+            spillPartition(victim);
+            victim = processTupleBuildPhaseInternal(tid, pid);
+        }
+
     }
 
-    protected void processTupleBuildPhaseInternal(int tid, int pid) throws HyracksDataException {
+    protected int processTupleBuildPhaseInternal(int tid, int pid) throws HyracksDataException {
         // insertTuple prevents the tuple to acquire a number of frames that is > the frame limit
         while (!bufferManager.insertTuple(pid, accessorBuild, tid, tempPtr)) {
             int numFrames = bufferManager.framesNeeded(accessorBuild.getTupleLength(tid), 0);
@@ -210,12 +213,19 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
                     // spilled)
                     spillPartition(pid);
                 }
-                return;
+                return -1;
             }
-            spillPartition(victimPartition);
+            return victimPartition;
         }
+        return -1;
     }
 
+    /**
+     * Write partition's output to buffer
+     * @param pid Partition Id to be Written to the Disk
+     * @return returns the number of Bytes Spilled to the Disk
+     * @throws HyracksDataException
+     */
     protected int spillPartition(int pid) throws HyracksDataException {
         RunFileWriter writer = getSpillWriterOrCreateNewOneIfNotExist(buildRFWriters, buildRelName, pid);
         int spilt = bufferManager.flushPartition(pid, writer);
@@ -501,16 +511,13 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
 
     protected boolean loadSpilledPartitionToMem(int pid, RunFileWriter wr) throws HyracksDataException {
         RunFileReader r = wr.createReader();
+        long fileSize = r.getFileSize();
         try {
             r.open();
             if (reloadBuffer == null) {
                 reloadBuffer = new VSizeFrame(jobletCtx);
             }
             while (r.nextFrame(reloadBuffer)) {
-                if (stats != null) {
-                    //TODO: be certain it is the case this is actually eagerly read
-                    stats.getBytesRead().update(reloadBuffer.getBuffer().limit());
-                }
                 accessorBuild.reset(reloadBuffer.getBuffer());
                 for (int tid = 0; tid < accessorBuild.getTupleCount(); tid++) {
                     if (!bufferManager.insertTuple(pid, accessorBuild, tid, tempPtr)) {
@@ -522,7 +529,15 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
             }
             // Closes and deletes the run file if it is already loaded into memory.
             r.setDeleteAfterClose(true);
-        } finally {
+        }
+        catch (Exception ex){
+            throw new HyracksDataException("Error Reloading Partition to Memory");
+        }
+        finally {
+            if (stats != null) {
+                //TODO: be certain it is the case this is actually eagerly read
+                stats.getBytesRead().update(fileSize);
+            }
             r.close();
         }
         spilledStatus.set(pid, false);
@@ -593,6 +608,8 @@ public class OptimizedHybridHashJoin implements IOptimizedHybridHashJoin {
                 }
             }
         }
+        probeFrames++;
+        inMemPartitionsProbeSum += numOfPartitions - spilledStatus.cardinality();
     }
 
     private void processTupleProbePhase(int tupleId, int pid) throws HyracksDataException {

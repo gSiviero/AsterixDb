@@ -147,6 +147,8 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
     private boolean forceNLJ = false;
     private boolean forceRoleReversal = false;
 
+    private int sigma = 10;
+
     private static final Logger LOGGER = LogManager.getLogger();
 
     public OptimizedHybridHashJoinOperatorDescriptor(IOperatorDescriptorRegistry spec, int memSizeInFrames,
@@ -159,8 +161,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
             IMissingWriterFactory[] nonMatchWriterFactories) {
         super(spec, 2, 1);
         this.memSizeInFrames = memSizeInFrames;
-        ResourceBrokerFake.setMemBudget(memSizeInFrames);
-        this.inputsize0 = inputsize0;
+        this.inputsize0 = 34805; //Hard Coded Size of Relation R
         this.fudgeFactor = factor;
         this.probeKeys = keys0;
         this.buildKeys = keys1;
@@ -173,6 +174,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
         this.buildPredEvalFactory = predEvalFactory1;
         this.isLeftOuter = isLeftOuter;
         this.nonMatchWriterFactories = nonMatchWriterFactories;
+        ResourceBrokerFake.configure(memSizeInFrames, 20, ResourceBrokerFake.MemoryDistributionType.Static, 0);
     }
 
     public OptimizedHybridHashJoinOperatorDescriptor(IOperatorDescriptorRegistry spec, int memSizeInFrames,
@@ -305,10 +307,14 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                         throw new HyracksDataException("Not enough memory is assigend for Hybrid Hash Join.");
                     }
                     state.memForJoin = memSizeInFrames - 2;
-
+                    int targetMemory = ResourceBrokerFake.generateStartingBudget();
                     state.numOfPartitions =
-                            getNumberOfPartitions(state.memForJoin, inputsize0, fudgeFactor, nPartitions);
-                    state.hybridHJ = new MemoryContentionResponsiveHHJ(ctx.getJobletContext(), state.memForJoin,
+                            getNumberOfPartitions(targetMemory, inputsize0, fudgeFactor, nPartitions);
+                    LOGGER.info("INPUT SIZE:"+inputsize0);
+                    LOGGER.info("[START EXPERIMENT] {\"SystemMemory\":" + state.memForJoin+ ",\"StartMemory\": "+targetMemory+",\"NumberOfPartitions\":"+state.numOfPartitions+"}[/START EXPERIMENT]");
+
+                    ResourceBrokerFake.updateMinimumMemory(state.numOfPartitions);
+                    state.hybridHJ = new MemoryContentionResponsiveHHJ(ctx.getJobletContext(),targetMemory,
                             state.numOfPartitions, PROBE_REL, BUILD_REL, probeRd, buildRd, probeHpc, buildHpc,
                             probePredEval, buildPredEval, isLeftOuter, nonMatchWriterFactories);
                     state.hybridHJ.setOperatorStats(stats);
@@ -622,8 +628,11 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                             && buildKeys == OptimizedHybridHashJoinOperatorDescriptor.this.probeKeys;
                     assert isLeftOuter ? !isReversed : true : "LeftOut Join can not reverse roles";
                     OptimizedHybridHashJoin rHHj;
-                    int n = getNumberOfPartitions(state.memForJoin, tableSize, fudgeFactor, nPartitions);
-                    rHHj = new MemoryContentionResponsiveHHJ(jobletCtx, state.memForJoin, n, PROBE_REL, BUILD_REL,
+                    int targetMemory = ResourceBrokerFake.generateStartingBudget();
+                    int n = getNumberOfPartitions(targetMemory, tableSize, fudgeFactor, nPartitions);
+                    LOGGER.info("[START EXPERIMENT] {\"SystemMemory\":" + state.memForJoin+ ",\"StartMemory\": "+targetMemory+",\"NumberOfPartitions\":"+n+"}[/START EXPERIMENT]");
+                    ResourceBrokerFake.updateMinimumMemory(n);
+                    rHHj = new MemoryContentionResponsiveHHJ(jobletCtx, targetMemory, n, PROBE_REL, BUILD_REL,
                             probeRd, buildRd, probeHpc, buildHpc, null, null, isLeftOuter, nonMatchWriterFactories); //checked-confirmed
 
                     rHHj.setIsReversed(isReversed);
@@ -650,9 +659,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                             while (probeSideReader.nextFrame(rPartbuff)) {
                                 rHHj.probe(rPartbuff.getBuffer(), writer);
                             }
-                            rHHj.completeProbe(writer);
-                            memSizeInFrames = rHHj.getMemSizeInFrames();
-                            state.memForJoin = memSizeInFrames - 2;
+                           rHHj.completeProbe(writer);
                         } finally {
                             rHHj.releaseResource();
                         }

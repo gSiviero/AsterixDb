@@ -21,10 +21,13 @@ package org.apache.hyracks.dataflow.std.buffermanager;
 import java.nio.ByteBuffer;
 
 import org.apache.hyracks.api.context.IHyracksFrameMgrContext;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class DeallocatableFramePoolDynamicBudget extends DeallocatableFramePool {
 
     int desiredBuffer = Integer.MAX_VALUE;
+    protected static final Logger LOGGER = LogManager.getLogger();
 
     public DeallocatableFramePoolDynamicBudget(IHyracksFrameMgrContext ctx, int memBudgetInBytes) {
         super(ctx, memBudgetInBytes);
@@ -40,7 +43,7 @@ public class DeallocatableFramePoolDynamicBudget extends DeallocatableFramePool 
                 memBudget = memBudget - framesReleased;
                 memBudget = Math.max(memBudget, desiredBuffer);
             }
-            allocated -= framesReleased;
+            allocated = allocated - framesReleased;
         } else {
             buffers.add(buffer);
         }
@@ -49,7 +52,7 @@ public class DeallocatableFramePoolDynamicBudget extends DeallocatableFramePool 
     @Override
     public boolean updateMemoryBudget(int newBudget) {
         desiredBuffer = newBudget * ctx.getInitialFrameSize();
-        if (this.allocated < desiredBuffer) {
+        if (this.allocated <= desiredBuffer) {
             this.memBudget = desiredBuffer; //Simply Update Memory Budget
             return true;
         }
