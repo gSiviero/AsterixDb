@@ -24,7 +24,7 @@ import org.apache.hyracks.control.nc.resources.memory.FrameManager;
 public class Common {
     static int MIN_FRAME_SIZE = 256;
     static int NUM_MIN_FRAME = 15;
-    static int BUDGET = NUM_MIN_FRAME * MIN_FRAME_SIZE;
+    public static int BUDGET = NUM_MIN_FRAME * MIN_FRAME_SIZE;
 
-    static FrameManager commonFrameManager = new FrameManager(MIN_FRAME_SIZE);
+    public static FrameManager commonFrameManager = new FrameManager(MIN_FRAME_SIZE);
 }

@@ -26,4 +26,6 @@ public interface IFrameReader {
     boolean nextFrame(IFrame frame) throws HyracksDataException;
 
     void close() throws HyracksDataException;
+
+    void setDeleteAfterClose(boolean set);
 }

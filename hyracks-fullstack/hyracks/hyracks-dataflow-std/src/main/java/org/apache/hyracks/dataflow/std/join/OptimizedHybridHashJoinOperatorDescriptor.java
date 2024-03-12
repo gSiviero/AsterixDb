@@ -23,6 +23,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
+import java.util.Random;
 
 import org.apache.hyracks.api.comm.IFrame;
 import org.apache.hyracks.api.comm.VSizeFrame;
@@ -69,43 +70,43 @@ import org.apache.logging.log4j.Logger;
 
 /**
  * @author pouria
- *         This class guides the joining process, and switches between different
- *         joining techniques, w.r.t the implemented optimizations and skew in size of the
- *         partitions.
- *         - Operator overview:
- *         Assume we are trying to do (R Join S), with M buffers available, while we have an estimate on the size
- *         of R (in terms of buffers). HHJ (Hybrid Hash Join) has two main phases: Build and Probe,
- *         where in our implementation Probe phase can apply HHJ recursively, based on the value of M and size of
- *         R and S. HHJ phases proceed as follow:
- *         BUILD:
- *         Calculate number of partitions (Based on the size of R, fudge factor and M)
- *         [See Shapiro's paper for the detailed discussion].
- *         Initialize the build phase (one frame per partition, all partitions considered resident at first)
- *         Read tuples of R, frame by frame, and hash each tuple (based on a given hash function) to find
- *         its target partition and try to append it to that partition:
- *         If target partition's buffer is full, try to allocate a new buffer for it.
- *         if no free buffer is available, find the largest resident partition and spill it. Using its freed
- *         buffers after spilling, allocate a new buffer for the target partition.
- *         Being done with R, close the build phase. (During closing we write the very last buffer of each
- *         spilled partition to the disk, and we do partition tuning, where we try to bring back as many buffers,
- *         belonging to spilled partitions as possible into memory, based on the free buffers - We will stop at the
- *         point where remaining free buffers is not enough for reloading an entire partition back into memory)
- *         Create the hash table for the resident partitions (basically we create an in-memory hash join here)
- *         PROBE:
- *         Initialize the probe phase on S (mainly allocate one buffer per spilled partition, and one buffer
- *         for the whole resident partitions)
- *         Read tuples of S, frame by frame and hash each tuple T to its target partition P
- *         if P is a resident partition, pass T to the in-memory hash join and generate the output record,
- *         if any matching(s) record found
- *         if P is spilled, write T to the dedicated buffer for P (on the probe side)
- *         Once scanning of S is done, we try to join partition pairs (Ri, Si) of the spilled partitions:
- *         if any of Ri or Si is smaller than M, then we simply use an in-memory hash join to join them
- *         otherwise we apply HHJ recursively:
- *         if after applying HHJ recursively, we do not gain enough size reduction (max size of the
- *         resulting partitions were more than 80% of the initial Ri,Si size) then we switch to
- *         nested loop join for joining.
- *         (At each step of partition-pair joining, we consider role reversal, which means if size of Si were
- *         greater than Ri, then we make sure that we switch the roles of build/probe between them)
+ * This class guides the joining process, and switches between different
+ * joining techniques, w.r.t the implemented optimizations and skew in size of the
+ * partitions.
+ * - Operator overview:
+ * Assume we are trying to do (R Join S), with M buffers available, while we have an estimate on the size
+ * of R (in terms of buffers). HHJ (Hybrid Hash Join) has two main phases: Build and Probe,
+ * where in our implementation Probe phase can apply HHJ recursively, based on the value of M and size of
+ * R and S. HHJ phases proceed as follow:
+ * BUILD:
+ * Calculate number of partitions (Based on the size of R, fudge factor and M)
+ * [See Shapiro's paper for the detailed discussion].
+ * Initialize the build phase (one frame per partition, all partitions considered resident at first)
+ * Read tuples of R, frame by frame, and hash each tuple (based on a given hash function) to find
+ * its target partition and try to append it to that partition:
+ * If target partition's buffer is full, try to allocate a new buffer for it.
+ * if no free buffer is available, find the largest resident partition and spill it. Using its freed
+ * buffers after spilling, allocate a new buffer for the target partition.
+ * Being done with R, close the build phase. (During closing we write the very last buffer of each
+ * spilled partition to the disk, and we do partition tuning, where we try to bring back as many buffers,
+ * belonging to spilled partitions as possible into memory, based on the free buffers - We will stop at the
+ * point where remaining free buffers is not enough for reloading an entire partition back into memory)
+ * Create the hash table for the resident partitions (basically we create an in-memory hash join here)
+ * PROBE:
+ * Initialize the probe phase on S (mainly allocate one buffer per spilled partition, and one buffer
+ * for the whole resident partitions)
+ * Read tuples of S, frame by frame and hash each tuple T to its target partition P
+ * if P is a resident partition, pass T to the in-memory hash join and generate the output record,
+ * if any matching(s) record found
+ * if P is spilled, write T to the dedicated buffer for P (on the probe side)
+ * Once scanning of S is done, we try to join partition pairs (Ri, Si) of the spilled partitions:
+ * if any of Ri or Si is smaller than M, then we simply use an in-memory hash join to join them
+ * otherwise we apply HHJ recursively:
+ * if after applying HHJ recursively, we do not gain enough size reduction (max size of the
+ * resulting partitions were more than 80% of the initial Ri,Si size) then we switch to
+ * nested loop join for joining.
+ * (At each step of partition-pair joining, we consider role reversal, which means if size of Si were
+ * greater than Ri, then we make sure that we switch the roles of build/probe between them)
  */
 
 public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorDescriptor {
@@ -143,6 +144,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
     private boolean skipInMemoryHJ = false;
     private boolean forceNLJ = false;
     private boolean forceRoleReversal = false;
+    Random r = new Random(2);
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -230,7 +232,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
 
         private int memForJoin;
         private int numOfPartitions;
-        private OptimizedHybridHashJoin hybridHJ;
+        private IHybridHashJoin hybridHJ;
 
         public BuildAndPartitionTaskState() {
         }
@@ -259,6 +261,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
      */
     private class PartitionAndBuildActivityNode extends AbstractActivityNode {
         private static final long serialVersionUID = 1L;
+        private int framesProcessed = 0;
 
         private final ActivityId probeAid;
 
@@ -300,7 +303,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                     state.memForJoin = memSizeInFrames - 2;
                     state.numOfPartitions =
                             getNumberOfPartitions(state.memForJoin, inputsize0, fudgeFactor, nPartitions);
-                    state.hybridHJ = new OptimizedHybridHashJoin(ctx.getJobletContext(), state.memForJoin,
+                    state.hybridHJ = new MemoryContentionResponsiveHHJ(ctx.getJobletContext(), state.memForJoin,
                             state.numOfPartitions, PROBE_REL, BUILD_REL, probeRd, buildRd, probeHpc, buildHpc,
                             probePredEval, buildPredEval, isLeftOuter, nonMatchWriterFactories);
                     state.hybridHJ.setOperatorStats(stats);
@@ -314,7 +317,12 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                    if (framesProcessed % 15 == 0) {
+                        int result = r.nextInt(30) + memSizeInFrames;
+                        state.hybridHJ.updateMemoryBudgetBuild(result);
+                    }
                     state.hybridHJ.build(buffer);
+                    framesProcessed++;
                 }
 
                 @Override
@@ -366,6 +374,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
         private static final long serialVersionUID = 1L;
 
         private final ActivityId buildAid;
+        private int framesProcessed = 0;
 
         public ProbeAndJoinActivityNode(ActivityId id, ActivityId buildAid) {
             super(id);
@@ -376,7 +385,6 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
         public IOperatorNodePushable createPushRuntime(final IHyracksTaskContext ctx,
                 IRecordDescriptorProvider recordDescProvider, final int partition, final int nPartitions)
                 throws HyracksDataException {
-
             final RecordDescriptor buildRd = recordDescProvider.getInputRecordDescriptor(buildAid, 0);
             final RecordDescriptor probeRd = recordDescProvider.getInputRecordDescriptor(getActivityId(), 0);
             final ITuplePairComparator probComp = tuplePairComparatorFactoryProbe2Build.createTuplePairComparator(ctx);
@@ -413,7 +421,6 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                     writer.open();
                     state.hybridHJ.initProbe(probComp);
                     state.hybridHJ.setOperatorStats(stats);
-
                     if (LOGGER.isDebugEnabled()) {
                         LOGGER.debug("OptimizedHybridHashJoin is starting the probe phase.");
                     }
@@ -421,7 +428,12 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
 
                 @Override
                 public void nextFrame(ByteBuffer buffer) throws HyracksDataException {
+                    if (framesProcessed % 10 == 0) {
+                        int result = r.nextInt(30) + memSizeInFrames;
+                        state.hybridHJ.updateMemoryBudgetProbe(result);
+                    }
                     state.hybridHJ.probe(buffer, writer);
+                    framesProcessed++;
                 }
 
                 @Override
@@ -443,7 +455,6 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                         } finally {
                             writer.close(); // writer should always be closed.
                         }
-                        logProbeComplete();
                         return;
                     }
                     try {
@@ -489,7 +500,6 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                         throw e;
                     } finally {
                         try {
-                            logProbeComplete();
                         } finally {
                             writer.close();
                         }
@@ -499,12 +509,6 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                 @Override
                 public void setOperatorStats(IOperatorStats stats) {
                     this.stats = stats;
-                }
-
-                private void logProbeComplete() {
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("OptimizedHybridHashJoin closed its probe phase");
-                    }
                 }
 
                 //The buildSideReader should be always the original buildSideReader, so should the probeSideReader
@@ -613,12 +617,13 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                     boolean isReversed = probeKeys == OptimizedHybridHashJoinOperatorDescriptor.this.buildKeys
                             && buildKeys == OptimizedHybridHashJoinOperatorDescriptor.this.probeKeys;
                     assert isLeftOuter ? !isReversed : true : "LeftOut Join can not reverse roles";
-                    OptimizedHybridHashJoin rHHj;
+                    IHybridHashJoin rHHj;
                     int n = getNumberOfPartitions(state.memForJoin, tableSize, fudgeFactor, nPartitions);
-                    rHHj = new OptimizedHybridHashJoin(jobletCtx, state.memForJoin, n, PROBE_REL, BUILD_REL, probeRd,
-                            buildRd, probeHpc, buildHpc, null, null, isLeftOuter, nonMatchWriterFactories); //checked-confirmed
+                    rHHj = new MemoryContentionResponsiveHHJ(jobletCtx, state.memForJoin, n, PROBE_REL, BUILD_REL,
+                            probeRd, buildRd, probeHpc, buildHpc, null, null, isLeftOuter, nonMatchWriterFactories); //checked-confirmed
 
                     rHHj.setIsReversed(isReversed);
+                    rHHj.setOperatorStats(stats);
                     try {
                         buildSideReader.open();
                         try {
@@ -656,7 +661,7 @@ public class OptimizedHybridHashJoinOperatorDescriptor extends AbstractOperatorD
                         int maxAfterProbeSize = rHHj.getMaxProbePartitionSize();
                         int afterMax = Math.max(maxAfterBuildSize, maxAfterProbeSize);
 
-                        BitSet rPStatus = rHHj.getPartitionStatus();
+                        BitSet rPStatus = rHHj.getInconsistentStatus();
                         if (!forceNLJ && (afterMax < (NLJ_SWITCH_THRESHOLD * beforeMax))) {
                             //Case 2.1.1 - Keep applying HHJ
                             if (LOGGER.isDebugEnabled()) {

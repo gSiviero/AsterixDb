@@ -27,6 +27,8 @@ import org.apache.hyracks.dataflow.std.structures.TuplePointer;
 
 public interface IPartitionedTupleBufferManager {
 
+    int getBufferPoolSize();
+
     int getNumPartitions();
 
     int getNumTuples(int partition);
@@ -131,4 +133,15 @@ public interface IPartitionedTupleBufferManager {
     void clearPartition(int partition) throws HyracksDataException;
 
     IPartitionedMemoryConstrain getConstrain();
+
+    /**
+     * Update memory budge
+     * If it is a memory <b>EXPANSION</b>, the memory budget will increase enlarging the Frame Pool's size.<br>
+     * If it is a memory <b>CONTENTION</b> the memory budget will decrease, in this case if there are unallocated
+     * frames they will be released until the desiredSize is reached. If it is not possible to release so many frames
+     * than this method returns FALSE so the operator can spill partitions.
+     * @param desiredSize Desired budget measured in Frames
+     * @return Returns True if Update was successfull, returns False if it was not possible to update the memory Budget.
+     */
+    boolean updateMemoryBudget(int desiredSize);
 }

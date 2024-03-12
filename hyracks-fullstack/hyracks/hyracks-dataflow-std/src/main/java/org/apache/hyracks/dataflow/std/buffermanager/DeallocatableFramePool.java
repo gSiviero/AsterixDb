@@ -25,19 +25,36 @@ import java.util.LinkedList;
 
 import org.apache.hyracks.api.context.IHyracksFrameMgrContext;
 import org.apache.hyracks.api.exceptions.HyracksDataException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class DeallocatableFramePool implements IDeallocatableFramePool {
-
+    private static final Logger LOGGER = LogManager.getLogger();
     private final IHyracksFrameMgrContext ctx;
-    private final int memBudget;
+    /**
+     * Total size of Memory Budget in <b>FRAMES</b>
+     */
+    private int memBudget;
+    /**
+     * Total number of already allocated <b>FRAMES</b>
+     */
     private int allocated;
     private LinkedList<ByteBuffer> buffers;
+
+    private boolean isDynamic = false;
+    private int desiredMemBudget;
 
     public DeallocatableFramePool(IHyracksFrameMgrContext ctx, int memBudgetInBytes) {
         this.ctx = ctx;
         this.memBudget = memBudgetInBytes;
         this.allocated = 0;
         this.buffers = new LinkedList<>();
+        desiredMemBudget = memBudget;
+    }
+
+    public DeallocatableFramePool(IHyracksFrameMgrContext ctx, int memBudgetInBytes, boolean dynamic) {
+        this(ctx, memBudgetInBytes);
+        this.isDynamic = dynamic;
     }
 
     @Override
@@ -100,13 +117,39 @@ public class DeallocatableFramePool implements IDeallocatableFramePool {
 
     @Override
     public void deAllocateBuffer(ByteBuffer buffer) {
-        if (buffer.capacity() != ctx.getInitialFrameSize()) {
-            // simply deallocate the Big Object frame
+        if (shouldDeallocate(buffer)) {
+            //Deallocate if Object is Large or it is a dynamic memory situation
             ctx.deallocateFrames(buffer.capacity());
             allocated -= buffer.capacity();
         } else {
             buffers.add(buffer);
         }
+    }
+
+    @Override
+    public int getMemoryBudget() {
+        return memBudget;
+    }
+
+    /**
+     * Update Memory Budget;
+     *
+     * @param desiredSize Desired Size measured in frames
+     */
+    @Override
+    public boolean updateMemoryBudget(int desiredSize) {
+        desiredMemBudget = isDynamic ? desiredSize * getMinFrameSize() : memBudget;
+        if (desiredMemBudget >= memBudget || allocated <= desiredMemBudget)
+            memBudget = desiredMemBudget;
+        return memBudget == desiredMemBudget;
+    }
+
+    private boolean shouldDeallocate(ByteBuffer buffer) {
+        //Big Sized Object frame should always be deallocated.
+        boolean shouldDeallocate = buffer.capacity() != ctx.getInitialFrameSize();
+        // Memory is Dinamic and the number of allocated buffers is greater than the desiredMemoryBudget.
+        shouldDeallocate = shouldDeallocate || (isDynamic && allocated > desiredMemBudget);
+        return shouldDeallocate;
     }
 
     @Override

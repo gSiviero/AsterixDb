@@ -55,13 +55,13 @@ public class InMemoryHashJoin {
     private ITuplePairComparator tpComparator;
     private final boolean isLeftOuter;
     private final ArrayTupleBuilder missingTupleBuild;
-    private final ISerializableTable table;
+    private ISerializableTable table;
     private final TuplePointer storedTuplePointer;
     private final boolean reverseOutputOrder; //Should we reverse the order of tuples, we are writing in output
     private final TupleInFrameListAccessor tupleAccessor;
     // To release frames
     private final ISimpleFrameBufferManager bufferManager;
-    private final boolean isTableCapacityNotZero;
+    private boolean isTableCapacityNotZero;
 
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -71,6 +71,11 @@ public class InMemoryHashJoin {
             ISerializableTable table, ISimpleFrameBufferManager bufferManager) throws HyracksDataException {
         this(ctx, accessorProbe, tpcProbe, accessorBuild, rDBuild, tpcBuild, isLeftOuter, missingWritersBuild, table,
                 false, bufferManager);
+    }
+
+    public void setTable(ISerializableTable table) {
+        this.table = table;
+        this.isTableCapacityNotZero = table.getTableSize() != 0;
     }
 
     public InMemoryHashJoin(IHyracksFrameMgrContext ctx, FrameTupleAccessor accessorProbe,

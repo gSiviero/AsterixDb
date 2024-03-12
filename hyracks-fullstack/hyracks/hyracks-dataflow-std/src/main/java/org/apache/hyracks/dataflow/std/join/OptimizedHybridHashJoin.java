@@ -57,14 +57,12 @@ import org.apache.logging.log4j.Logger;
  * This class mainly applies one level of HHJ on a pair of
  * relations. It is always called by the descriptor.
  */
-public class OptimizedHybridHashJoin {
+public class OptimizedHybridHashJoin implements IHybridHashJoin {
 
     private static final Logger LOGGER = LogManager.getLogger();
     // Used for special probe BigObject which can not be held into the Join memory
     private FrameTupleAppender bigFrameAppender;
-
     private final IHyracksJobletContext jobletCtx;
-
     private final String buildRelName;
     private final String probeRelName;
     private final ITuplePartitionComputer buildHpc;
@@ -300,7 +298,7 @@ public class OptimizedHybridHashJoin {
      * @return the number of tuples in memory after this method is executed.
      * @throws HyracksDataException
      */
-    private int makeSpaceForHashTableAndBringBackSpilledPartitions() throws HyracksDataException {
+    public int makeSpaceForHashTableAndBringBackSpilledPartitions() throws HyracksDataException {
         int frameSize = jobletCtx.getInitialFrameSize();
         long freeSpace = (long) (memSizeInFrames - spilledStatus.cardinality()) * frameSize;
 
@@ -344,7 +342,7 @@ public class OptimizedHybridHashJoin {
     /**
      * Brings back some partitions if there is free memory and partitions that fit in that space.
      *
-     * @param freeSpace current amount of free space in memory
+     * @param freeSpace     current amount of free space in memory
      * @param inMemTupCount number of in memory tuples
      * @return number of in memory tuples after bringing some (or none) partitions in memory.
      * @throws HyracksDataException
@@ -402,7 +400,8 @@ public class OptimizedHybridHashJoin {
 
     /**
      * Finds a partition that can fit in the left over memory.
-     * @param freeSpace current free space
+     *
+     * @param freeSpace     current free space
      * @param inMemTupCount number of tuples currently in memory
      * @return partition id of selected partition to reload
      */
@@ -629,6 +628,10 @@ public class OptimizedHybridHashJoin {
         return spilledStatus;
     }
 
+    public BitSet getInconsistentStatus() {
+        return spilledStatus;
+    }
+
     public int getPartitionSize(int pid) {
         return bufferManager.getPhysicalSize(pid);
     }
@@ -652,5 +655,22 @@ public class OptimizedHybridHashJoin {
 
     public void setOperatorStats(IOperatorStats stats) {
         this.stats = stats;
+    }
+
+    @Override
+    public int updateMemoryBudgetBuild(int newBudget) throws HyracksDataException {
+        return 0;
+        //Nothing to do here
+    }
+
+    @Override
+    public int updateMemoryBudgetProbe(int newBudget) throws HyracksDataException {
+        return 0;
+        //Do Nothing
+    }
+
+    @Override
+    public long getBuildFramesInMemory() {
+        return 0;
     }
 }
